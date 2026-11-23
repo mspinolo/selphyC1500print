@@ -20,6 +20,18 @@ int selphy_lcms_srgb_to_printer(
     size_t pixel_count
 );
 
+/// LittleCMS reference with BPC controlled independently for source and destination profiles.
+int selphy_lcms_srgb_to_printer_profile_bpc(
+    const char *source_profile_path,
+    const char *printer_profile_path,
+    uint32_t rendering_intent,
+    int source_bpc,
+    int destination_bpc,
+    const uint8_t *input_rgb,
+    uint8_t *output_rgb,
+    size_t pixel_count
+);
+
 #ifdef __cplusplus
 }
 #endif
