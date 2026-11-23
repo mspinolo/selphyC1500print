@@ -114,8 +114,11 @@ enum ColorCorrectionService {
             throw CorrectionError.unsupportedColorSpace(sourceURL)
         }
 
+        let embeddedICCData = imageColorSpace.copyICCData()
+        let sourceColorSpace = embeddedICCData == nil ? CGColorSpace(name: CGColorSpace.sRGB)! : imageColorSpace
+
         let sourceProfile: ColorSyncProfile
-        if let iccData = imageColorSpace.copyICCData(),
+        if let iccData = embeddedICCData,
            let profile = ColorSyncProfileCreate(iccData, nil)?.takeRetainedValue() {
             sourceProfile = profile
         } else {
@@ -133,7 +136,7 @@ enum ColorCorrectionService {
 
         let width = image.width
         let height = image.height
-        let bytesPerRow = width * 3
+        let bytesPerRow = width * 4
         let byteCount = bytesPerRow * height
 
         var sourcePixels = Data(count: byteCount)
@@ -144,8 +147,8 @@ enum ColorCorrectionService {
                 height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
-                space: imageColorSpace,
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
+                space: sourceColorSpace,
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)).rawValue
             ) else {
                 return false
             }
@@ -164,11 +167,11 @@ enum ColorCorrectionService {
                     height,
                     destination.baseAddress,
                     kColorSync8BitInteger,
-                    kColorSyncAlphaNone,
+                    kColorSyncByteOrder32Big | kColorSyncAlphaNoneSkipLast,
                     bytesPerRow,
                     source.baseAddress,
                     kColorSync8BitInteger,
-                    kColorSyncAlphaNone,
+                    kColorSyncByteOrder32Big | kColorSyncAlphaNoneSkipLast,
                     bytesPerRow,
                     nil
                 )
@@ -185,10 +188,10 @@ enum ColorCorrectionService {
                 width: width,
                 height: height,
                 bitsPerComponent: 8,
-                bitsPerPixel: 24,
+                bitsPerPixel: 32,
                 bytesPerRow: bytesPerRow,
                 space: sRGB,
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)),
                 provider: provider,
                 decode: nil,
                 shouldInterpolate: true,
