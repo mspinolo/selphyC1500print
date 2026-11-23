@@ -29,7 +29,7 @@ struct ICCProfileReport {
             return "Profilo caricato, ma classe/spazio colore non corrispondono a un profilo stampante RGB con PCS Lab."
         }
         return "Profilo stampante RGB / Lab valido. Tabelle disponibili: " +
-            availableIntents.map(\.title).joined(separator: ", ")
+            availableIntents.map(\\.title).joined(separator: ", ")
     }
 }
 
@@ -45,29 +45,45 @@ enum ICCProfileInspector {
             case .tooShort: "Il file è troppo corto per contenere un profilo ICC."
             case .invalidDeclaredSize: "La dimensione dichiarata nell'intestazione ICC non coincide con quella del file."
             case .missingSignature: "Firma ICC 'acsp' non trovata."
-            case .invalidTagTable: "La tabella dei tag ICC è incompleta o contiene offset non validi."
+            case .invalidTagTable: "La tabella dei tag ICC è incompleta o contiene offset/dimensioni non validi."
             }
         }
     }
 
+    private static let headerAndCountSize = 132
+    private static let tagEntrySize = 12
+
     static func inspect(url: URL) throws -> ICCProfileReport {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        guard data.count >= 132 else { throw InspectionError.tooShort }
+        guard data.count >= headerAndCountSize else { throw InspectionError.tooShort }
 
         let declaredSize = Int(readUInt32(data, at: 0))
         guard declaredSize == data.count else { throw InspectionError.invalidDeclaredSize }
         guard readSignature(data, at: 36) == "acsp" else { throw InspectionError.missingSignature }
 
         let tagCount = Int(readUInt32(data, at: 128))
-        guard tagCount <= (data.count - 132) / 12 else { throw InspectionError.invalidTagTable }
+        let availableTableBytes = data.count - headerAndCountSize
+        guard tagCount <= availableTableBytes / tagEntrySize else {
+            throw InspectionError.invalidTagTable
+        }
 
+        let tagTableEnd = headerAndCountSize + tagCount * tagEntrySize
         var tags = Set<String>()
+
         for index in 0..<tagCount {
-            let entry = 132 + index * 12
+            let entry = headerAndCountSize + index * tagEntrySize
             let signature = readSignature(data, at: entry)
             let offset = Int(readUInt32(data, at: entry + 4))
             let size = Int(readUInt32(data, at: entry + 8))
-            guard offset >= 0, size >= 0, offset <= data.count, size <= data.count - offset else {
+
+            // ICC tag data must be non-empty, 4-byte aligned, and located
+            // after the complete tag table. Subtraction-based bounds checking
+            // avoids overflow in offset + size.
+            guard size > 0,
+                  offset >= tagTableEnd,
+                  offset.isMultiple(of: 4),
+                  offset <= data.count,
+                  size <= data.count - offset else {
                 throw InspectionError.invalidTagTable
             }
             tags.insert(signature)
@@ -77,7 +93,7 @@ enum ICCProfileInspector {
         let versionMinor = data[9] >> 4
         return ICCProfileReport(
             fileSize: data.count,
-            version: "\(versionMajor).\(versionMinor)",
+            version: "\\(versionMajor).\\(versionMinor)",
             profileClass: readSignature(data, at: 12),
             colorSpace: readSignature(data, at: 16),
             connectionSpace: readSignature(data, at: 20),
