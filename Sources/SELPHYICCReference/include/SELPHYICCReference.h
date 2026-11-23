@@ -11,6 +11,7 @@ extern "C" {
 /// Independent LittleCMS reference transform: sRGB input to the supplied
 /// printer profile's device RGB values. Returns 1 on success, 0 on failure.
 int selphy_lcms_srgb_to_printer(
+    const char *source_profile_path,
     const char *printer_profile_path,
     uint32_t rendering_intent,
     int black_point_compensation,
