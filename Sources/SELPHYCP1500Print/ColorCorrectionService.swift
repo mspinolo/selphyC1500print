@@ -66,8 +66,9 @@ enum ColorCorrectionService {
                     }
                 }
 
+                let uniqueSuffix = String(UUID().uuidString.prefix(8))
                 let outputURL = sessionFolder
-                    .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY-test")
+                    .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY-test-\(uniqueSuffix)")
                     .appendingPathExtension("jpg")
 
                 try correct(
