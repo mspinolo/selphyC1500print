@@ -28,9 +28,10 @@ Run the automated suite on macOS:
 swift test
 ```
 
-The suite covers ICC header/tag-table parsing, malformed profiles, and end-to-end ColorSync conversion. The macOS CI downloads the licensed Farbenwerk profile into the ephemeral runner's temporary directory and runs the real-profile integration tests; the profile is not committed or uploaded as an artifact. To run the same tests locally, make the profile available:
+The suite covers ICC header/tag-table parsing, malformed profiles, end-to-end ColorSync conversion, and a numerical comparison of ColorSync output against an independent LittleCMS transform over a 32-patch sRGB chart. CI installs LittleCMS only as a test oracle; the app itself continues to use native ColorSync. The macOS CI downloads the licensed Farbenwerk profile into the ephemeral runner's temporary directory and runs the real-profile integration tests; the profile is not committed or uploaded as an artifact. To run the same tests locally, make the profile available:
 
 ```sh
+brew install little-cms2 pkgconf
 SELPHY_TEST_PRINTER_PROFILE="/path/to/ICC-Profile165-CP1500.icc" swift test
 ```
 
