@@ -89,9 +89,15 @@ int selphy_lcms_srgb_to_printer_profile_bpc(
     }
 
     cmsHPROFILE profiles[2] = { source_profile, printer_profile };
+    // LittleCMS applies BPC at the PCS connection while processing the
+    // output profile (profile index 1 in a two-profile transform). In the
+    // current implementation this is BPC[1], not BPC[0]. Map the source
+    // profile's ColorSync sequence option to that connection. The final
+    // profile has no subsequent PCS connection, so destination_bpc cannot
+    // represent a second independent BPC operation in this two-profile chain.
     cmsBool bpc[2] = {
-        source_bpc ? TRUE : FALSE,
-        destination_bpc ? TRUE : FALSE
+        destination_bpc ? TRUE : FALSE,
+        source_bpc ? TRUE : FALSE
     };
     cmsUInt32Number intents[2] = { rendering_intent, rendering_intent };
     cmsFloat64Number adaptation_states[2] = { 1.0, 1.0 };
