@@ -94,10 +94,10 @@ final class ICCProfileInspectorTests: XCTestCase {
 
     func testRejectsEmptyTagPayload() throws {
         var data = Self.minimalICCProfile(tagSignatures: ["A2B0"])
+        data[140] = 0
+        data[141] = 0
+        data[142] = 0
         data[143] = 0
-        data[144] = 0
-        data[145] = 0
-        data[146] = 0
         let url = try temporaryFile(data: data)
         XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
             guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
