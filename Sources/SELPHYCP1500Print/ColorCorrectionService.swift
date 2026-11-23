@@ -215,9 +215,9 @@ enum ColorCorrectionService {
         }
     }
 
-    /// Applies the same production ColorSync transform to a tightly packed
-    /// 32-bit big-endian RGBX buffer. Kept internal so tests can compare the
-    /// numeric transform output before lossy JPEG encoding.
+    /// Applies the production ColorSync transform to a 32-bit big-endian
+    /// RGBX Core Graphics buffer, packing it to 24-bit RGB for ColorSync.
+    /// Kept internal so tests can compare numeric output before JPEG encoding.
     static func convertRGBPixels(
         _ sourcePixels: Data,
         width: Int,
@@ -242,27 +242,64 @@ enum ColorCorrectionService {
             throw CorrectionError.transformCreation
         }
 
-        let bytesPerRow = width * 4
-        var correctedPixels = Data(count: sourcePixels.count)
-        let converted = correctedPixels.withUnsafeMutableBytes { destination in
+        // ColorSync's packed RGB (three consecutive 8-bit channels) is
+        // reliable across the system CMMs. The 32-bit RGBX layout can be
+        // rejected even for an sRGB identity transform on current macOS.
+        // Keep Core Graphics' convenient 4-byte bitmap at the image boundary,
+        // but explicitly pack/unpack RGB around ColorSyncTransformConvert.
+        let pixelCount = width * height
+        let packedBytesPerRow = width * 3
+        var packedSource = Data(count: pixelCount * 3)
+        packedSource.withUnsafeMutableBytes { packedDestination in
             sourcePixels.withUnsafeBytes { source in
+                let dst = packedDestination.bindMemory(to: UInt8.self)
+                let src = source.bindMemory(to: UInt8.self)
+                for pixel in 0..<pixelCount {
+                    let sourceOffset = pixel * 4
+                    let destinationOffset = pixel * 3
+                    dst[destinationOffset] = src[sourceOffset]
+                    dst[destinationOffset + 1] = src[sourceOffset + 1]
+                    dst[destinationOffset + 2] = src[sourceOffset + 2]
+                }
+            }
+        }
+
+        var packedCorrected = Data(count: pixelCount * 3)
+        let converted = packedCorrected.withUnsafeMutableBytes { destination in
+            packedSource.withUnsafeBytes { source in
                 ColorSyncTransformConvert(
                     transform,
                     width,
                     height,
                     destination.baseAddress,
                     kColorSync8BitInteger,
-                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
-                    bytesPerRow,
+                    UInt32(kColorSyncAlphaNone.rawValue),
+                    packedBytesPerRow,
                     source.baseAddress,
                     kColorSync8BitInteger,
-                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
-                    bytesPerRow,
+                    UInt32(kColorSyncAlphaNone.rawValue),
+                    packedBytesPerRow,
                     nil
                 )
             }
         }
         guard converted else { throw CorrectionError.pixelTransformFailed }
+
+        var correctedPixels = Data(count: sourcePixels.count)
+        correctedPixels.withUnsafeMutableBytes { destination in
+            packedCorrected.withUnsafeBytes { source in
+                let dst = destination.bindMemory(to: UInt8.self)
+                let src = source.bindMemory(to: UInt8.self)
+                for pixel in 0..<pixelCount {
+                    let sourceOffset = pixel * 3
+                    let destinationOffset = pixel * 4
+                    dst[destinationOffset] = src[sourceOffset]
+                    dst[destinationOffset + 1] = src[sourceOffset + 1]
+                    dst[destinationOffset + 2] = src[sourceOffset + 2]
+                    dst[destinationOffset + 3] = 0
+                }
+            }
+        }
         return correctedPixels
     }
 
