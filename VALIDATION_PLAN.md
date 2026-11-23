@@ -10,13 +10,13 @@ Run on macOS with the project toolchain:
 swift test
 ```
 
-Run the integration tests with the licensed Farbenwerk profile available locally:
+The macOS CI workflow downloads the licensed Farbenwerk profile into its ephemeral runner and executes the real-profile integration tests without committing or uploading the profile. To run the same tests locally, make the profile available:
 
 ```sh
 SELPHY_TEST_PRINTER_PROFILE="/absolute/path/ICC-Profile165-CP1500.icc" swift test
 ```
 
-The profile must not be committed, uploaded as a CI artifact, or copied into test fixtures.
+The profile must not be committed, uploaded as a CI artifact, or copied into test fixtures. The CI download is used only during the ephemeral job.
 
 The suite currently checks:
 
