@@ -3,6 +3,7 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import SELPHYICCReference
 @testable import SELPHYCP1500Print
 
 final class ICCProfileInspectorTests: XCTestCase {
@@ -162,6 +163,89 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         }
     }
 
+    func testColorSyncMatchesIndependentLittleCMSReference() throws {
+        let profileURL = try realProfileURL()
+        let sourceURL = try makeColorChartJPEG()
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        let source = try rgbaPixels(from: sourceURL)
+        XCTAssertEqual(source.width, 64)
+        XCTAssertEqual(source.height, 48)
+
+        // Sample the center of each of the 32 color patches to avoid JPEG
+        // ringing and chroma-subsampling artifacts at patch boundaries.
+        var inputRGB: [UInt8] = []
+        for row in 0..<4 {
+            for column in 0..<8 {
+                let x = column * 8 + 4
+                let y = row * 12 + 6
+                let offset = (y * source.width + x) * 4
+                inputRGB.append(contentsOf: [
+                    source.pixels[offset],
+                    source.pixels[offset + 1],
+                    source.pixels[offset + 2]
+                ])
+            }
+        }
+
+        for intent in RenderingIntent.allCases {
+            for bpc in [false, true] {
+                var referenceRGB = [UInt8](repeating: 0, count: inputRGB.count)
+                let referenceSucceeded = profileURL.path.withCString { path in
+                    inputRGB.withUnsafeBufferPointer { input in
+                        referenceRGB.withUnsafeMutableBufferPointer { output in
+                            selphy_lcms_srgb_to_printer(
+                                path,
+                                intent.lcmsIntent,
+                                bpc ? 1 : 0,
+                                input.baseAddress,
+                                output.baseAddress,
+                                inputRGB.count / 3
+                            )
+                        }
+                    }
+                }
+                XCTAssertEqual(referenceSucceeded, 1, "LittleCMS reference transform failed for \(intent), BPC=\(bpc)")
+
+                let result = try ColorCorrectionService.prepareCopies(
+                    from: [sourceURL],
+                    printerProfileURL: profileURL,
+                    intent: intent,
+                    blackPointCompensation: bpc
+                )
+                defer { try? FileManager.default.removeItem(at: result.folder) }
+                let corrected = try rgbaPixels(from: XCTUnwrap(result.files.first))
+
+                var absoluteDifferences: [Int] = []
+                for (sampleIndex, _) in (0..<32).enumerated() {
+                    let row = sampleIndex / 8
+                    let column = sampleIndex % 8
+                    let x = column * 8 + 4
+                    let y = row * 12 + 6
+                    let outputOffset = (y * corrected.width + x) * 4
+                    for channel in 0..<3 {
+                        let actual = Int(corrected.pixels[outputOffset + channel])
+                        let expected = Int(referenceRGB[sampleIndex * 3 + channel])
+                        absoluteDifferences.append(abs(actual - expected))
+                    }
+                }
+
+                let meanDifference = Double(absoluteDifferences.reduce(0, +)) / Double(absoluteDifferences.count)
+                let maximumDifference = absoluteDifferences.max() ?? 0
+                XCTAssertLessThanOrEqual(
+                    meanDifference,
+                    3.0,
+                    "ColorSync/LittleCMS mean channel error \(meanDifference) for \(intent), BPC=\(bpc)"
+                )
+                XCTAssertLessThanOrEqual(
+                    maximumDifference,
+                    10,
+                    "ColorSync/LittleCMS maximum channel error \(maximumDifference) for \(intent), BPC=\(bpc)"
+                )
+            }
+        }
+    }
+
     func testInvalidProfileFailsWithoutChangingSource() throws {
         let invalidProfile = FileManager.default.temporaryDirectory
             .appendingPathComponent("invalid-\(UUID().uuidString).icc")
@@ -256,6 +340,75 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         return URL(fileURLWithPath: path)
     }
 
+    private func rgbaPixels(from url: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let width = image.width
+        let height = image.height
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = pixels.withUnsafeMutableBytes { rawBuffer -> Bool in
+            guard let context = CGContext(
+                data: rawBuffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.union(
+                    CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)
+                ).rawValue
+            ) else {
+                return false
+            }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        XCTAssertTrue(rendered)
+        return (width, height, pixels)
+    }
+
+    private func makeColorChartJPEG() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selphy-chart-\(UUID().uuidString).jpg")
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 64,
+            height: 48,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        let colors: [(CGFloat, CGFloat, CGFloat)] = [
+            (0.00, 0.00, 0.00), (0.10, 0.10, 0.10), (0.25, 0.25, 0.25), (0.50, 0.50, 0.50),
+            (0.75, 0.75, 0.75), (0.90, 0.90, 0.90), (1.00, 1.00, 1.00), (0.95, 0.95, 0.90),
+            (1.00, 0.00, 0.00), (0.00, 1.00, 0.00), (0.00, 0.00, 1.00), (1.00, 1.00, 0.00),
+            (0.00, 1.00, 1.00), (1.00, 0.00, 1.00), (0.85, 0.20, 0.10), (0.10, 0.25, 0.85),
+            (0.76, 0.52, 0.38), (0.65, 0.40, 0.30), (0.90, 0.65, 0.50), (0.35, 0.20, 0.15),
+            (0.10, 0.35, 0.15), (0.25, 0.55, 0.30), (0.45, 0.65, 0.40), (0.75, 0.85, 0.65),
+            (0.10, 0.20, 0.35), (0.25, 0.40, 0.60), (0.45, 0.60, 0.80), (0.70, 0.80, 0.95),
+            (0.20, 0.10, 0.25), (0.45, 0.20, 0.50), (0.70, 0.40, 0.75), (0.90, 0.70, 0.85)
+        ]
+
+        for row in 0..<4 {
+            for column in 0..<8 {
+                let color = colors[row * 8 + column]
+                context.setFillColor(red: color.0, green: color.1, blue: color.2, alpha: 1)
+                context.fill(CGRect(x: column * 8, y: row * 12, width: 8, height: 12))
+            }
+        }
+
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+        ))
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
     private func makeRGBJPEG(at destinationURL: URL? = nil) throws -> URL {
         let url = destinationURL ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("selphy-source-\(UUID().uuidString).jpg")
@@ -302,5 +455,15 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return url
+    }
+}
+
+private extension RenderingIntent {
+    var lcmsIntent: UInt32 {
+        switch self {
+        case .perceptual: 0
+        case .relativeColorimetric: 1
+        case .saturation: 2
+        }
     }
 }
