@@ -87,7 +87,7 @@ final class ICCProfileInspectorTests: XCTestCase {
         let url = try temporaryFile(data: data)
         XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
             guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
-                return XCTFail("Expected invalidTagTable, got \\(error)")
+                return XCTFail("Expected invalidTagTable, got \(error)")
             }
         }
     }
@@ -101,7 +101,7 @@ final class ICCProfileInspectorTests: XCTestCase {
         let url = try temporaryFile(data: data)
         XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
             guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
-                return XCTFail("Expected invalidTagTable, got \\(error)")
+                return XCTFail("Expected invalidTagTable, got \(error)")
             }
         }
     }
@@ -112,7 +112,7 @@ final class ICCProfileInspectorTests: XCTestCase {
         let url = try temporaryFile(data: data)
         XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
             guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
-                return XCTFail("Expected invalidTagTable, got \\(error)")
+                return XCTFail("Expected invalidTagTable, got \(error)")
             }
         }
     }
