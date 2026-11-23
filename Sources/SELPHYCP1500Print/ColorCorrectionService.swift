@@ -133,6 +133,16 @@ enum ColorCorrectionService {
 
         let width = image.width
         let height = image.height
+        // Bound allocations before multiplying dimensions. A single RGBX
+        // buffer is 4 bytes/pixel and the conversion temporarily holds both
+        // source and destination buffers.
+        let maximumPixelCount = 100_000_000
+        guard width > 0, height > 0,
+              width <= Int.max / 4,
+              height <= Int.max / (width * 4),
+              width <= maximumPixelCount / height else {
+            throw CorrectionError.bitmapContext
+        }
         let bytesPerRow = width * 4
         let byteCount = bytesPerRow * height
 
