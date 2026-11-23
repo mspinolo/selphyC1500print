@@ -1,5 +1,9 @@
 name: macOS build
 
+concurrency:
+  group: selphy-cp1500-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
