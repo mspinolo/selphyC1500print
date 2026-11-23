@@ -523,7 +523,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                             }
                         }
                     }
-                    XCTAssertEqual(succeeded, 1, "Standard cmsCreateTransform failed, BPC=\\(bpc)")
+                    XCTAssertEqual(succeeded, 1, "Standard cmsCreateTransform failed, BPC=\(bpc)")
                     return output
                 }
 
@@ -536,7 +536,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 )
                 let standardBPCChangeCount = zip(standardWithoutBPC, standardWithBPC)
                     .filter { $0 != $1 }.count
-                print("LCMS standard BPC activation: changedBytes=\\(standardBPCChangeCount)/\\(standardWithBPC.count)")
+                print("LCMS standard BPC activation: changedBytes=\(standardBPCChangeCount)/\(standardWithBPC.count)")
                 XCTAssertGreaterThan(
                     standardBPCChangeCount, 0,
                     "Relative-colorimetric cmsCreateTransform must produce a measurable BPC on/off difference for this profile/chart"
@@ -549,9 +549,9 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                     let distanceToStandardNoBPC = zip(extended, standardWithoutBPC)
                         .filter { $0 != $1 }.count
                     print(
-                        "LCMS extended BPC index probe: flags=\\(key), " +
-                        "differentBytesVsStandardBPC=\\(distanceToStandardBPC), " +
-                        "differentBytesVsStandardNoBPC=\\(distanceToStandardNoBPC)"
+                        "LCMS extended BPC index probe: flags=\(key), " +
+                        "differentBytesVsStandardBPC=\(distanceToStandardBPC), " +
+                        "differentBytesVsStandardNoBPC=\(distanceToStandardNoBPC)"
                     )
                 }
             }
