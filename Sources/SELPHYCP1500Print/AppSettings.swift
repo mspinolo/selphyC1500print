@@ -1,7 +1,7 @@
 import Foundation
 import AppKit
 
-enum RenderingIntent: String, CaseIterable, Identifiable, Sendable {
+enum RenderingIntent: String, CaseIterable, Identifiable, Sendable, Hashable {
     case perceptual
     case relativeColorimetric
     case saturation
