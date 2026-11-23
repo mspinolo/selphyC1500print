@@ -28,7 +28,7 @@ Run the automated suite on macOS:
 swift test
 ```
 
-The suite covers ICC header/tag-table parsing, malformed profiles, and end-to-end ColorSync conversion. The real-profile integration tests are skipped unless the licensed Farbenwerk profile is made available locally:
+The suite covers ICC header/tag-table parsing, malformed profiles, and end-to-end ColorSync conversion. The macOS CI downloads the licensed Farbenwerk profile into the ephemeral runner's temporary directory and runs the real-profile integration tests; the profile is not committed or uploaded as an artifact. To run the same tests locally, make the profile available:
 
 ```sh
 SELPHY_TEST_PRINTER_PROFILE="/path/to/ICC-Profile165-CP1500.icc" swift test
