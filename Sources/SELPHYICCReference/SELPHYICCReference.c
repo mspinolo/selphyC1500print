@@ -2,6 +2,7 @@
 #include <lcms2.h>
 
 int selphy_lcms_srgb_to_printer(
+    const char *source_profile_path,
     const char *printer_profile_path,
     uint32_t rendering_intent,
     int black_point_compensation,
@@ -16,7 +17,9 @@ int selphy_lcms_srgb_to_printer(
         return 0;
     }
 
-    cmsHPROFILE source_profile = cmsCreate_sRGBProfile();
+    cmsHPROFILE source_profile = source_profile_path != NULL
+        ? cmsOpenProfileFromFile(source_profile_path, "r")
+        : cmsCreate_sRGBProfile();
     if (source_profile == NULL) {
         return 0;
     }
