@@ -77,6 +77,46 @@ final class ICCProfileInspectorTests: XCTestCase {
         }
     }
 
+    func testRejectsTagPayloadOverlappingTagTable() throws {
+        var data = Self.minimalICCProfile(tagSignatures: ["A2B0"])
+        // Point the tag payload back into its own table entry.
+        data[136] = 0
+        data[137] = 0
+        data[138] = 0
+        data[139] = 132
+        let url = try temporaryFile(data: data)
+        XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
+            guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
+                return XCTFail("Expected invalidTagTable, got \\(error)")
+            }
+        }
+    }
+
+    func testRejectsEmptyTagPayload() throws {
+        var data = Self.minimalICCProfile(tagSignatures: ["A2B0"])
+        data[143] = 0
+        data[144] = 0
+        data[145] = 0
+        data[146] = 0
+        let url = try temporaryFile(data: data)
+        XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
+            guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
+                return XCTFail("Expected invalidTagTable, got \\(error)")
+            }
+        }
+    }
+
+    func testRejectsUnalignedTagPayloadOffset() throws {
+        var data = Self.minimalICCProfile(tagSignatures: ["A2B0"])
+        data[139] = data[139] &+ 1
+        let url = try temporaryFile(data: data)
+        XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
+            guard case ICCProfileInspector.InspectionError.invalidTagTable = error else {
+                return XCTFail("Expected invalidTagTable, got \\(error)")
+            }
+        }
+    }
+
     func testRealFarbenwerkProfileWhenPathIsProvided() throws {
         guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
             throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to the licensed Farbenwerk ICC file.")
@@ -118,11 +158,17 @@ final class ICCProfileInspectorTests: XCTestCase {
         put32(0, at: 64)
         put32(UInt32(tagSignatures.count), at: 128)
 
+        // All fixture tags share one valid 4-byte payload, as ICC permits
+        // identical tag data to be referenced by multiple signatures.
+        if !tagSignatures.isEmpty {
+            data.append(contentsOf: [0, 0, 0, 0])
+            put32(UInt32(data.count), at: 0)
+        }
         for (index, signature) in tagSignatures.enumerated() {
             let entry = 132 + index * 12
             putSignature(signature, at: entry)
             put32(UInt32(headerSize), at: entry + 4)
-            put32(0, at: entry + 8)
+            put32(4, at: entry + 8)
         }
         return data
     }
