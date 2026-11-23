@@ -17,7 +17,7 @@ final class ICCProfileInspectorTests: XCTestCase {
 
     func testRejectsWrongDeclaredSize() throws {
         var data = Self.minimalICCProfile()
-        data[0] = 0
+        data[3] = data[3] &- 1
         let url = try temporaryFile(data: data)
         XCTAssertThrowsError(try ICCProfileInspector.inspect(url: url)) { error in
             guard case ICCProfileInspector.InspectionError.invalidDeclaredSize = error else {
