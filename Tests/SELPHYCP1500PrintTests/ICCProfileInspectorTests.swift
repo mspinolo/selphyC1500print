@@ -4,6 +4,7 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 import SELPHYICCReference
+import ColorSync
 @testable import SELPHYCP1500Print
 
 final class ICCProfileInspectorTests: XCTestCase {
@@ -172,20 +173,29 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertEqual(source.width, 64)
         XCTAssertEqual(source.height, 48)
 
+        guard let unmanagedSourceProfile = ColorSyncProfileCreateWithName(
+            kColorSyncSRGBProfile.takeUnretainedValue()
+        ) else {
+            return XCTFail("System sRGB ColorSync profile unavailable")
+        }
+        let sourceProfile = unmanagedSourceProfile.takeRetainedValue()
+        let printerProfile = try ColorCorrectionService.loadProfile(at: profileURL)
+        let inputBuffer = Data(source.pixels)
+
         // Sample the center of each of the 32 color patches to avoid JPEG
         // ringing and chroma-subsampling artifacts at patch boundaries.
         var inputRGB: [UInt8] = []
-        for row in 0..<4 {
-            for column in 0..<8 {
-                let x = column * 8 + 4
-                let y = row * 12 + 6
-                let offset = (y * source.width + x) * 4
-                inputRGB.append(contentsOf: [
-                    source.pixels[offset],
-                    source.pixels[offset + 1],
-                    source.pixels[offset + 2]
-                ])
+        let sampleOffsets: [Int] = (0..<4).flatMap { row in
+            (0..<8).map { column in
+                ((row * 12 + 6) * source.width + (column * 8 + 4)) * 4
             }
+        }
+        for offset in sampleOffsets {
+            inputRGB.append(contentsOf: [
+                source.pixels[offset],
+                source.pixels[offset + 1],
+                source.pixels[offset + 2]
+            ])
         }
 
         for intent in RenderingIntent.allCases {
@@ -207,40 +217,46 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 }
                 XCTAssertEqual(referenceSucceeded, 1, "LittleCMS reference transform failed for \(intent), BPC=\(bpc)")
 
-                let result = try ColorCorrectionService.prepareCopies(
-                    from: [sourceURL],
-                    printerProfileURL: profileURL,
+                let colorSyncBuffer = try ColorCorrectionService.convertRGBPixels(
+                    inputBuffer,
+                    width: source.width,
+                    height: source.height,
+                    sourceProfile: sourceProfile,
+                    printerProfile: printerProfile,
                     intent: intent,
                     blackPointCompensation: bpc
                 )
-                defer { try? FileManager.default.removeItem(at: result.folder) }
-                let corrected = try rgbaPixels(from: XCTUnwrap(result.files.first))
+                let colorSyncRGBX = [UInt8](colorSyncBuffer)
 
                 var absoluteDifferences: [Int] = []
-                for (sampleIndex, _) in (0..<32).enumerated() {
-                    let row = sampleIndex / 8
-                    let column = sampleIndex % 8
-                    let x = column * 8 + 4
-                    let y = row * 12 + 6
-                    let outputOffset = (y * corrected.width + x) * 4
+                for (sampleIndex, offset) in sampleOffsets.enumerated() {
                     for channel in 0..<3 {
-                        let actual = Int(corrected.pixels[outputOffset + channel])
+                        let actual = Int(colorSyncRGBX[offset + channel])
                         let expected = Int(referenceRGB[sampleIndex * 3 + channel])
                         absoluteDifferences.append(abs(actual - expected))
                     }
                 }
 
+                let sortedDifferences = absoluteDifferences.sorted()
                 let meanDifference = Double(absoluteDifferences.reduce(0, +)) / Double(absoluteDifferences.count)
-                let maximumDifference = absoluteDifferences.max() ?? 0
+                let percentile95 = sortedDifferences[Int(Double(sortedDifferences.count - 1) * 0.95)]
+                let maximumDifference = sortedDifferences.last ?? 0
+                print("ICC numeric comparison: intent=\(intent), BPC=\(bpc), mean=\(meanDifference), p95=\(percentile95), max=\(maximumDifference)")
+
                 XCTAssertLessThanOrEqual(
                     meanDifference,
-                    3.0,
-                    "ColorSync/LittleCMS mean channel error \(meanDifference) for \(intent), BPC=\(bpc)"
+                    1.5,
+                    "ColorSync/LittleCMS mean raw RGB error \(meanDifference) for \(intent), BPC=\(bpc)"
+                )
+                XCTAssertLessThanOrEqual(
+                    percentile95,
+                    4,
+                    "ColorSync/LittleCMS p95 raw RGB error \(percentile95) for \(intent), BPC=\(bpc)"
                 )
                 XCTAssertLessThanOrEqual(
                     maximumDifference,
-                    10,
-                    "ColorSync/LittleCMS maximum channel error \(maximumDifference) for \(intent), BPC=\(bpc)"
+                    8,
+                    "ColorSync/LittleCMS maximum raw RGB error \(maximumDifference) for \(intent), BPC=\(bpc)"
                 )
             }
         }
