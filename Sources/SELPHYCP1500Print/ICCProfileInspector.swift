@@ -29,7 +29,7 @@ struct ICCProfileReport {
             return "Profilo caricato, ma classe/spazio colore non corrispondono a un profilo stampante RGB con PCS Lab."
         }
         return "Profilo stampante RGB / Lab valido. Tabelle disponibili: " +
-            availableIntents.map(\\.title).joined(separator: ", ")
+            availableIntents.map(\.title).joined(separator: ", ")
     }
 }
 
@@ -93,7 +93,7 @@ enum ICCProfileInspector {
         let versionMinor = data[9] >> 4
         return ICCProfileReport(
             fileSize: data.count,
-            version: "\\(versionMajor).\\(versionMinor)",
+            version: "\(versionMajor).\(versionMinor)",
             profileClass: readSignature(data, at: 12),
             colorSpace: readSignature(data, at: 16),
             connectionSpace: readSignature(data, at: 20),
