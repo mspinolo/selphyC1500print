@@ -433,8 +433,12 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let sourceImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(sourceImageSource, 0, nil))
         let sourceICC = try XCTUnwrap(sourceImage.colorSpace?.copyICCData())
         let sourceProfile = try XCTUnwrap(ColorSyncProfileCreate(sourceICC, nil)?.takeRetainedValue())
-        let printerProfile = try ColorCorrectionService.loadProfile(at: profileURL)
+        let sourceProfileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selphy-bpc-source-\(UUID().uuidString).icc")
+        try (sourceICC as Data).write(to: sourceProfileURL)
+        defer { try? FileManager.default.removeItem(at: sourceProfileURL) }
 
+        let printerProfile = try ColorCorrectionService.loadProfile(at: profileURL)
         var inputRGB: [UInt8] = []
         let offsets = (0..<4).flatMap { row in
             (0..<8).map { column in ((row * 12 + 6) * source.width + (column * 8 + 4)) * 4 }
@@ -451,6 +455,30 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let destinationTag = kColorSyncTransformPCSToDevice.takeUnretainedValue()
 
         for intent in [RenderingIntent.relativeColorimetric, .perceptual] {
+            var lcmsReferences: [Bool: [UInt8]] = [:]
+            for bpc in [false, true] {
+                var reference = [UInt8](repeating: 0, count: inputRGB.count)
+                let succeeded = sourceProfileURL.path.withCString { sourcePath in
+                    profileURL.path.withCString { printerPath in
+                        inputRGB.withUnsafeBufferPointer { input in
+                            reference.withUnsafeMutableBufferPointer { output in
+                                selphy_lcms_srgb_to_printer(
+                                    sourcePath,
+                                    printerPath,
+                                    intent.lcmsIntent,
+                                    bpc ? 1 : 0,
+                                    input.baseAddress,
+                                    output.baseAddress,
+                                    inputRGB.count / 3
+                                )
+                            }
+                        }
+                    }
+                }
+                XCTAssertEqual(succeeded, 1, "LittleCMS diagnostic reference failed for \(intent), BPC=\(bpc)")
+                lcmsReferences[bpc] = reference
+            }
+
             for placement in ["none", "source", "destination", "both"] {
                 let sourceBPC = placement == "source" || placement == "both"
                 let destinationBPC = placement == "destination" || placement == "both"
@@ -481,8 +509,20 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                         )
                     }
                 }
-                XCTAssertTrue(converted, "ColorSync conversion failed for \\(intent), BPC placement=\\(placement)")
-                print("BPC placement diagnostic: intent=\\(intent), placement=\\(placement), outputSample=\\(Array(output.prefix(12)))")
+                XCTAssertTrue(converted, "ColorSync conversion failed for \(intent), BPC placement=\(placement)")
+                guard converted else { continue }
+
+                // Compare no-BPC placement to LittleCMS without BPC; all other
+                // placements to LittleCMS with BPC. This identifies which
+                // ColorSync sequence entry best matches LittleCMS semantics.
+                let expectedBPC = placement != "none"
+                let reference = try XCTUnwrap(lcmsReferences[expectedBPC])
+                let differences = zip(output, reference).map { abs(Int($0) - Int($1)) }
+                let sorted = differences.sorted()
+                let mean = Double(differences.reduce(0, +)) / Double(max(differences.count, 1))
+                let p95 = sorted[Int(Double(sorted.count - 1) * 0.95)]
+                let maximum = sorted.last ?? 0
+                print("BPC placement comparison: intent=\(intent), placement=\(placement), referenceBPC=\(expectedBPC), mean=\(String(format: "%.3f", mean)), p95=\(p95), max=\(maximum), sample=\(Array(output.prefix(12)))")
             }
         }
     }
