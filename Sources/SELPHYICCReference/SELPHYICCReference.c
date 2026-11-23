@@ -143,16 +143,12 @@ int selphy_lcms_srgb_to_printer_profile_bpc(
     }
 
     cmsHPROFILE profiles[2] = { source_profile, printer_profile };
-    // LittleCMS indexes BPC by the PCS connection AFTER each profile:
-    // BPC[0] is the connection from profile 0 (source) to profile 1
-    // (destination). A two-profile chain has only that one connection;
-    // there is no second PCS connection after the final destination profile.
-    // ColorSync's source-entry BPC option therefore maps to BPC[0].
-    // destination_bpc is retained in this diagnostic API to keep the
-    // placement matrix explicit, but cannot enable another connection here.
+    // cmsCreateExtendedTransform accepts one BPC state per profile.
+    // Keep both entries independently controllable for the diagnostic matrix;
+    // their actual effect is verified against cmsCreateTransform in tests.
     cmsBool bpc[2] = {
         source_bpc ? TRUE : FALSE,
-        FALSE
+        destination_bpc ? TRUE : FALSE
     };
     cmsUInt32Number intents[2] = { rendering_intent, rendering_intent };
     cmsFloat64Number adaptation_states[2] = { 1.0, 1.0 };
