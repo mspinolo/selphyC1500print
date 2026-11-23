@@ -423,6 +423,70 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         }
     }
 
+    func testColorSyncBPCPlacementDiagnostic() throws {
+        let profileURL = try realProfileURL()
+        let sourceURL = try makeColorChartJPEG()
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        let source = try rgbaPixels(from: sourceURL)
+        let sourceImageSource = try XCTUnwrap(CGImageSourceCreateWithURL(sourceURL as CFURL, nil))
+        let sourceImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(sourceImageSource, 0, nil))
+        let sourceICC = try XCTUnwrap(sourceImage.colorSpace?.copyICCData())
+        let sourceProfile = try XCTUnwrap(ColorSyncProfileCreate(sourceICC, nil)?.takeRetainedValue())
+        let printerProfile = try ColorCorrectionService.loadProfile(at: profileURL)
+
+        var inputRGB: [UInt8] = []
+        let offsets = (0..<4).flatMap { row in
+            (0..<8).map { column in ((row * 12 + 6) * source.width + (column * 8 + 4)) * 4 }
+        }
+        for offset in offsets {
+            inputRGB.append(contentsOf: [source.pixels[offset], source.pixels[offset + 1], source.pixels[offset + 2]])
+        }
+
+        let profileKey = kColorSyncProfile.takeUnretainedValue()
+        let intentKey = kColorSyncRenderingIntent.takeUnretainedValue()
+        let tagKey = kColorSyncTransformTag.takeUnretainedValue()
+        let bpcKey = kColorSyncBlackPointCompensation.takeUnretainedValue()
+        let sourceTag = kColorSyncTransformDeviceToPCS.takeUnretainedValue()
+        let destinationTag = kColorSyncTransformPCSToDevice.takeUnretainedValue()
+
+        for intent in [RenderingIntent.relativeColorimetric, .perceptual] {
+            for placement in ["none", "source", "destination", "both"] {
+                let sourceBPC = placement == "source" || placement == "both"
+                let destinationBPC = placement == "destination" || placement == "both"
+                let sourceEntry: [CFString: Any] = [
+                    profileKey: sourceProfile,
+                    intentKey: intent.colorSyncValueForTests,
+                    tagKey: sourceTag,
+                    bpcKey: sourceBPC
+                ]
+                let destinationEntry: [CFString: Any] = [
+                    profileKey: printerProfile,
+                    intentKey: intent.colorSyncValueForTests,
+                    tagKey: destinationTag,
+                    bpcKey: destinationBPC
+                ]
+                let sequence = [sourceEntry as CFDictionary, destinationEntry as CFDictionary] as CFArray
+                let transform = try XCTUnwrap(ColorSyncTransformCreate(sequence, nil)?.takeRetainedValue())
+
+                var output = [UInt8](repeating: 0, count: inputRGB.count)
+                let converted = output.withUnsafeMutableBytes { destination in
+                    inputRGB.withUnsafeBytes { sourceBytes in
+                        ColorSyncTransformConvert(
+                            transform, inputRGB.count / 3, 1,
+                            destination.baseAddress, kColorSync8BitInteger,
+                            UInt32(kColorSyncAlphaNone.rawValue), inputRGB.count,
+                            sourceBytes.baseAddress, kColorSync8BitInteger,
+                            UInt32(kColorSyncAlphaNone.rawValue), inputRGB.count, nil
+                        )
+                    }
+                }
+                XCTAssertTrue(converted, "ColorSync conversion failed for \\(intent), BPC placement=\\(placement)")
+                print("BPC placement diagnostic: intent=\\(intent), placement=\\(placement), outputSample=\\(Array(output.prefix(12)))")
+            }
+        }
+    }
+
     func testInvalidProfileFailsWithoutChangingSource() throws {
         let invalidProfile = FileManager.default.temporaryDirectory
             .appendingPathComponent("invalid-\(UUID().uuidString).icc")
