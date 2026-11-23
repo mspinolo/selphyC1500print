@@ -474,11 +474,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 )
             }
 
-            // LittleCMS BPC is applied at a PCS connection. For this two-profile
-            // chain, its implementation evaluates the connection while processing
-            // profile index 1 (BPC[1]); the helper maps the source sequence option
-            // to that connection. The destination sequence option is not a second
-            // independent PCS connection in this chain.
+            // LittleCMS BPC is indexed by the PCS connection after each
+            // profile: BPC[0] is the connection from source profile 0 to
+            // destination profile 1. This two-profile chain has no second
+            // connection after the final profile, so the destination-entry
+            // ColorSync option cannot be represented as another BPC operation.
             var lcmsReferences: [String: [UInt8]] = [:]
             for sourceBPC in [false, true] {
                 for destinationBPC in [false, true] {
