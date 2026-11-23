@@ -180,8 +180,84 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: sourceURL), originalBytes)
     }
 
-    private func makeRGBJPEG() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
+    func testBatchFailureRemovesPartialSessionAndPreservesInputs() throws {
+        let profileURL = try realProfileURL()
+        let validURL = try makeRGBJPEG()
+        let invalidURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("broken-source-\(UUID().uuidString).jpg")
+        try Data("not a JPEG".utf8).write(to: invalidURL)
+        defer {
+            try? FileManager.default.removeItem(at: validURL)
+            try? FileManager.default.removeItem(at: invalidURL)
+        }
+
+        let validBytes = try Data(contentsOf: validURL)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SELPHYCP1500Print", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let before = Set(try FileManager.default.contentsOfDirectory(atPath: root.path))
+
+        XCTAssertThrowsError(try ColorCorrectionService.prepareCopies(
+            from: [validURL, invalidURL],
+            printerProfileURL: profileURL,
+            intent: .perceptual,
+            blackPointCompensation: false
+        ))
+
+        let after = Set(try FileManager.default.contentsOfDirectory(atPath: root.path))
+        XCTAssertEqual(after, before, "A failed batch must remove its partially generated session")
+        XCTAssertEqual(try Data(contentsOf: validURL), validBytes, "A failed batch must not modify any source")
+    }
+
+    func testSameBasenameInputsProduceDistinctOutputFiles() throws {
+        let profileURL = try realProfileURL()
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SELPHY-Duplicate-Names-\(UUID().uuidString)", isDirectory: true)
+        let firstFolder = parent.appendingPathComponent("one", isDirectory: true)
+        let secondFolder = parent.appendingPathComponent("two", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+
+        let first = try makeRGBJPEG(at: firstFolder.appendingPathComponent("photo.jpg"))
+        let second = try makeRGBJPEG(at: secondFolder.appendingPathComponent("photo.jpg"))
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [first, second],
+            printerProfileURL: profileURL,
+            intent: .perceptual,
+            blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+
+        XCTAssertEqual(result.files.count, 2)
+        XCTAssertNotEqual(result.files[0].lastPathComponent, result.files[1].lastPathComponent)
+        XCTAssertTrue(result.files.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
+    func testGrayscaleJPEGIsRejectedWithoutChangingSource() throws {
+        let profileURL = try realProfileURL()
+        let sourceURL = try makeGrayscaleJPEG()
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        let original = try Data(contentsOf: sourceURL)
+
+        XCTAssertThrowsError(try ColorCorrectionService.prepareCopies(
+            from: [sourceURL],
+            printerProfileURL: profileURL,
+            intent: .perceptual,
+            blackPointCompensation: false
+        ))
+        XCTAssertEqual(try Data(contentsOf: sourceURL), original)
+    }
+
+    private func realProfileURL() throws -> URL {
+        guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
+            throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run real-profile integration tests.")
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    private func makeRGBJPEG(at url: URL? = nil) throws -> URL {
+        let url = url ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("selphy-source-\(UUID().uuidString).jpg")
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(
@@ -195,6 +271,30 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         ))
         context.setFillColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+        ))
+        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    private func makeGrayscaleJPEG() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selphy-gray-\(UUID().uuidString).jpg")
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.genericGrayGamma2_2))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 32,
+            height: 24,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ))
+        context.setFillColor(gray: 0.5, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
         let image = try XCTUnwrap(context.makeImage())
         let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
             url as CFURL, UTType.jpeg.identifier as CFString, 1, nil
