@@ -700,6 +700,17 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
 }
 
 private extension RenderingIntent {
+    var colorSyncValueForTests: CFString {
+        switch self {
+        case .perceptual:
+            kColorSyncRenderingIntentPerceptual.takeUnretainedValue()
+        case .relativeColorimetric:
+            kColorSyncRenderingIntentRelative.takeUnretainedValue()
+        case .saturation:
+            kColorSyncRenderingIntentSaturation.takeUnretainedValue()
+        }
+    }
+
     var lcmsIntent: UInt32 {
         switch self {
         case .perceptual: 0
