@@ -111,7 +111,7 @@ struct ContentView: View {
                                 .lineLimit(1)
                         }
                         HStack {
-                            Text("Temporanei: eliminazione automatica dopo 24 ore.")
+                            Text("Temporanei: rimossi al prossimo utilizzo se più vecchi di 24 ore.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
