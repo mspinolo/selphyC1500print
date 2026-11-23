@@ -173,12 +173,36 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertEqual(source.width, 64)
         XCTAssertEqual(source.height, 48)
 
-        guard let unmanagedSourceProfile = ColorSyncProfileCreateWithName(
-            kColorSyncSRGBProfile.takeUnretainedValue()
-        ) else {
-            return XCTFail("System sRGB ColorSync profile unavailable")
+        let sourceImageSource = try XCTUnwrap(CGImageSourceCreateWithURL(sourceURL as CFURL, nil))
+        let sourceImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(sourceImageSource, 0, nil))
+        let embeddedSourceICC = sourceImage.colorSpace?.copyICCData()
+        let sourceProfile: ColorSyncProfile
+        let sourceProfileURL: URL?
+
+        if let embeddedSourceICC {
+            guard let unmanaged = ColorSyncProfileCreate(embeddedSourceICC, nil) else {
+                return XCTFail("Cannot create ColorSync profile from embedded source ICC")
+            }
+            sourceProfile = unmanaged.takeRetainedValue()
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("selphy-source-profile-\(UUID().uuidString).icc")
+            try embeddedSourceICC.write(to: url)
+            sourceProfileURL = url
+        } else {
+            guard let unmanaged = ColorSyncProfileCreateWithName(
+                kColorSyncSRGBProfile.takeUnretainedValue()
+            ) else {
+                return XCTFail("System sRGB ColorSync profile unavailable")
+            }
+            sourceProfile = unmanaged.takeRetainedValue()
+            sourceProfileURL = nil
         }
-        let sourceProfile = unmanagedSourceProfile.takeRetainedValue()
+        defer {
+            if let sourceProfileURL {
+                try? FileManager.default.removeItem(at: sourceProfileURL)
+            }
+        }
+
         let printerProfile = try ColorCorrectionService.loadProfile(at: profileURL)
         let inputBuffer = Data(source.pixels)
 
@@ -201,17 +225,39 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         for intent in RenderingIntent.allCases {
             for bpc in [false, true] {
                 var referenceRGB = [UInt8](repeating: 0, count: inputRGB.count)
-                let referenceSucceeded = profileURL.path.withCString { path in
-                    inputRGB.withUnsafeBufferPointer { input in
-                        referenceRGB.withUnsafeMutableBufferPointer { output in
-                            selphy_lcms_srgb_to_printer(
-                                path,
-                                intent.lcmsIntent,
-                                bpc ? 1 : 0,
-                                input.baseAddress,
-                                output.baseAddress,
-                                inputRGB.count / 3
-                            )
+                let referenceSucceeded: Int32
+                if let sourceProfileURL {
+                    referenceSucceeded = sourceProfileURL.path.withCString { sourcePath in
+                        profileURL.path.withCString { printerPath in
+                            inputRGB.withUnsafeBufferPointer { input in
+                                referenceRGB.withUnsafeMutableBufferPointer { output in
+                                    selphy_lcms_srgb_to_printer(
+                                        sourcePath,
+                                        printerPath,
+                                        intent.lcmsIntent,
+                                        bpc ? 1 : 0,
+                                        input.baseAddress,
+                                        output.baseAddress,
+                                        inputRGB.count / 3
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    referenceSucceeded = profileURL.path.withCString { printerPath in
+                        inputRGB.withUnsafeBufferPointer { input in
+                            referenceRGB.withUnsafeMutableBufferPointer { output in
+                                selphy_lcms_srgb_to_printer(
+                                    nil,
+                                    printerPath,
+                                    intent.lcmsIntent,
+                                    bpc ? 1 : 0,
+                                    input.baseAddress,
+                                    output.baseAddress,
+                                    inputRGB.count / 3
+                                )
+                            }
                         }
                     }
                 }
