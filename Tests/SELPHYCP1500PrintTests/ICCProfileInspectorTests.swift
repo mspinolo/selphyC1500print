@@ -256,8 +256,8 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         return URL(fileURLWithPath: path)
     }
 
-    private func makeRGBJPEG(at url: URL? = nil) throws -> URL {
-        let url = url ?? FileManager.default.temporaryDirectory
+    private func makeRGBJPEG(at destinationURL: URL? = nil) throws -> URL {
+        let url = destinationURL ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("selphy-source-\(UUID().uuidString).jpg")
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(
