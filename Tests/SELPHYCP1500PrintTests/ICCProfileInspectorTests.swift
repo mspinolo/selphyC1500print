@@ -474,11 +474,9 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 )
             }
 
-            // LittleCMS BPC is indexed by the PCS connection after each
-            // profile: BPC[0] is the connection from source profile 0 to
-            // destination profile 1. This two-profile chain has no second
-            // connection after the final profile, so the destination-entry
-            // ColorSync option cannot be represented as another BPC operation.
+            // cmsCreateExtendedTransform exposes one BPC flag per profile.
+            // We test both entries independently below instead of assuming
+            // their semantics from the API parameter names.
             var lcmsReferences: [String: [UInt8]] = [:]
             for sourceBPC in [false, true] {
                 for destinationBPC in [false, true] {
@@ -506,6 +504,55 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                         "LittleCMS per-profile reference failed for \(intent), source BPC=\(sourceBPC), destination BPC=\(destinationBPC)"
                     )
                     lcmsReferences["\(sourceBPC)-\(destinationBPC)"] = reference
+                }
+            }
+
+            if intent == .relativeColorimetric {
+                func standardReference(bpc: Bool) throws -> [UInt8] {
+                    var output = [UInt8](repeating: 0, count: inputRGB.count)
+                    let succeeded = sourceProfileURL.path.withCString { sourcePath in
+                        profileURL.path.withCString { printerPath in
+                            inputRGB.withUnsafeBufferPointer { input in
+                                output.withUnsafeMutableBufferPointer { destination in
+                                    selphy_lcms_srgb_to_printer(
+                                        sourcePath, printerPath, intent.lcmsIntent,
+                                        bpc ? 1 : 0, input.baseAddress,
+                                        destination.baseAddress, inputRGB.count / 3
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    XCTAssertEqual(succeeded, 1, "Standard cmsCreateTransform failed, BPC=\\(bpc)")
+                    return output
+                }
+
+                let standardWithoutBPC = try standardReference(bpc: false)
+                let standardWithBPC = try standardReference(bpc: true)
+                let extendedWithoutBPC = try XCTUnwrap(lcmsReferences["false-false"])
+                XCTAssertEqual(
+                    extendedWithoutBPC, standardWithoutBPC,
+                    "Extended transform with both BPC entries disabled must match standard transform without BPC"
+                )
+                let standardBPCChangeCount = zip(standardWithoutBPC, standardWithBPC)
+                    .filter { $0 != $1 }.count
+                print("LCMS standard BPC activation: changedBytes=\\(standardBPCChangeCount)/\\(standardWithBPC.count)")
+                XCTAssertGreaterThan(
+                    standardBPCChangeCount, 0,
+                    "Relative-colorimetric cmsCreateTransform must produce a measurable BPC on/off difference for this profile/chart"
+                )
+
+                for key in ["true-false", "false-true", "true-true"] {
+                    let extended = try XCTUnwrap(lcmsReferences[key])
+                    let distanceToStandardBPC = zip(extended, standardWithBPC)
+                        .filter { $0 != $1 }.count
+                    let distanceToStandardNoBPC = zip(extended, standardWithoutBPC)
+                        .filter { $0 != $1 }.count
+                    print(
+                        "LCMS extended BPC index probe: flags=\\(key), " +
+                        "differentBytesVsStandardBPC=\\(distanceToStandardBPC), " +
+                        "differentBytesVsStandardNoBPC=\\(distanceToStandardNoBPC)"
+                    )
                 }
             }
 
