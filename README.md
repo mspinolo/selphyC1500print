@@ -1,48 +1,41 @@
 # SELPHY CP1500 Print
 
-A small native macOS utility for preparing JPEG copies with the Farbenwerk ICC profile and sending them to a Canon SELPHY CP1500.
+A native macOS utility for preparing JPEG copies for a Canon SELPHY CP1500.
 
-> **Status: early development.** The repository is being initialized. No print or ICC-conversion workflow is considered validated until tested against the actual profile and printer.
+> **Status: early development.** The current milestone adds persistent color-management preferences and structural ICC validation. No conversion or print job has yet been validated on a Mac with the actual printer.
 
-## Goals
+## Current milestone
 
-- Keep source photographs strictly read-only.
-- Let the user choose JPEG files and a printer.
-- Remember preferences between launches (including a security-scoped bookmark for the ICC profile).
-- Create converted print copies in a private temporary directory.
-- Submit print jobs through macOS printing services (CUPS).
-- Remove temporary files after the job has completed or failed.
-- Make color-management choices explicit and inspectable.
+- Native SwiftUI macOS interface.
+- Persistent printer name, rendering intent, BPC preference and security-scoped ICC bookmark.
+- Structural validation of the selected ICC file (header, declared size, tag-table bounds, device class, color space, PCS and A2B/B2A table pairs).
+- JPEG selection without modifying source files.
 
-## Color-management notes
+## Color-management findings
 
-The CP1500 does not expose a user-selectable custom ICC output profile in its normal consumer printing workflow. Farbenwerk describes its CP1500 profile as a way to pre-adjust the image before printing, while the printer's own internal processing remains active.
+The supplied Farbenwerk profile has been inspected independently: ICC 4.3, class `prtr`, RGB device space, Lab PCS, and A2B/B2A tables for perceptual, media-relative colorimetric and saturation intents.
 
-That means this app must **not** blindly treat the Farbenwerk profile as an ordinary printer destination profile and then also allow an uncontrolled second conversion. The correct transform direction, rendering intent, output tagging and printer-driver settings must be established from the actual ICC profile and verified with test prints before enabling production printing.
+The profile is a printer profile. The intended pre-adjustment workflow still needs to be confirmed with test prints and the exact Canon/macOS driver path. The app therefore does not yet convert images or submit print jobs. In particular, it must not silently apply a second color conversion after pre-adjustment.
 
-The original JPEG is never a conversion target. All experiments and final processing operate on a copy.
+## Planned next steps
 
-## Planned implementation
-
-1. Native SwiftUI macOS interface and persistent settings.
-2. JPEG selection, image preview and profile inspection.
-3. ColorSync-based ICC processing, enabled only after the profile workflow is validated.
-4. Printer discovery and print submission through macOS.
-5. Temporary-file lifecycle and failure-safe cleanup.
+1. Implement the ColorSync transform with explicit source profile, Farbenwerk profile, rendering intent and BPC.
+2. Define and verify the output tagging expected by the Canon print queue.
+3. Create disposable print copies and validate color handling through USB.
+4. Add printer discovery and robust print-job lifecycle/cleanup.
+5. Verify Wi-Fi printing using the same macOS print pipeline.
 
 ## Build
 
-Requires macOS and Xcode with the Swift toolchain.
+Requires macOS 14 or later and Xcode/Swift 5.9 or later.
 
 ```sh
 swift build
 swift run
 ```
 
-The first development milestone is a compilable UI/settings foundation. Printing and ICC conversion will be added in separately verifiable steps.
-
 ## Privacy and files
 
-- Source JPEGs are not modified.
-- ICC profiles are selected by the user; proprietary profile files are not included in this repository.
-- Temporary print files are created outside the photo library and are removed after use.
+- Source JPEGs are read-only; all processing will target temporary copies.
+- ICC profiles are selected by the user and are not bundled as application resources.
+- Temporary print files will be created outside the photo library and removed after use.
