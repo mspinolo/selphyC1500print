@@ -455,9 +455,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let destinationTag = kColorSyncTransformPCSToDevice.takeUnretainedValue()
 
         for intent in [RenderingIntent.relativeColorimetric, .perceptual] {
-            // cmsCreateTransform's global BPC flag enables BPC for every
-            // profile in its chain. Use cmsCreateExtendedTransform through
-            // this helper to compare the same per-profile settings ColorSync exposes.
+            // LittleCMS BPC is applied at a PCS connection. For this two-profile
+            // chain, its implementation evaluates the connection while processing
+            // profile index 1 (BPC[1]); the helper maps the source sequence option
+            // to that connection. The destination sequence option is not a second
+            // independent PCS connection in this chain.
             var lcmsReferences: [String: [UInt8]] = [:]
             for sourceBPC in [false, true] {
                 for destinationBPC in [false, true] {
@@ -532,9 +534,14 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
 
                 let matchingKey = "\(sourceBPC)-\(destinationBPC)"
                 let matchingReference = try XCTUnwrap(lcmsReferences[matchingKey])
+                let allReferenceComparisons = lcmsReferences
+                    .map { key, reference in "\(key): {\(differenceSummary(against: reference))}" }
+                    .sorted()
+                    .joined(separator: "; ")
                 print(
                     "BPC semantic comparison: intent=\(intent), placement=\(placement), " +
-                    "matching-LCMS-profile-BPC {\(differenceSummary(against: matchingReference))}, " +
+                    "matching-LCMS-connection-BPC {\(differenceSummary(against: matchingReference))}, " +
+                    "all-LCMS-references=[\(allReferenceComparisons)], " +
                     "sample=\(Array(output.prefix(12)))"
                 )
 
@@ -567,6 +574,21 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                        let dictionary = value as? [CFString: Any] {
                         let bpcComponentKey = kColorSyncConversionBPC.takeUnretainedValue()
                         detail += ", BPCComponent=\(String(describing: dictionary[bpcComponentKey]))"
+                    }
+                    if name == "full", let components = value as? [Any] {
+                        let bpcComponentKey = kColorSyncConversionBPC.takeUnretainedValue()
+                        let summaries = components.enumerated().map { index, component -> String in
+                            if let dictionary = component as? [CFString: Any] {
+                                let keys = dictionary.keys.map { String(describing: $0) }.sorted()
+                                let bpc = String(describing: dictionary[bpcComponentKey] ?? "nil")
+                                return "\(index):dict(keys=\(keys),BPC=\(bpc))"
+                            }
+                            if let data = component as? Data {
+                                return "\(index):data(bytes=\(data.count))"
+                            }
+                            return "\(index):\(type(of: component))"
+                        }
+                        detail += ", components=[\(summaries.joined(separator: "; "))]"
                     }
                     print("ColorSync transform property: name=\(name), intent=\(intent), placement=\(placement), \(detail)")
                 }
