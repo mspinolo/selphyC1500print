@@ -168,11 +168,11 @@ enum ColorCorrectionService {
                     height,
                     destination.baseAddress,
                     kColorSync8BitInteger,
-                    kColorSyncByteOrder32Big | kColorSyncAlphaNoneSkipLast,
+                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
                     bytesPerRow,
                     source.baseAddress,
                     kColorSync8BitInteger,
-                    kColorSyncByteOrder32Big | kColorSyncAlphaNoneSkipLast,
+                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
                     bytesPerRow,
                     nil
                 )
