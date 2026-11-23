@@ -455,28 +455,37 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let destinationTag = kColorSyncTransformPCSToDevice.takeUnretainedValue()
 
         for intent in [RenderingIntent.relativeColorimetric, .perceptual] {
-            var lcmsReferences: [Bool: [UInt8]] = [:]
-            for bpc in [false, true] {
-                var reference = [UInt8](repeating: 0, count: inputRGB.count)
-                let succeeded = sourceProfileURL.path.withCString { sourcePath in
-                    profileURL.path.withCString { printerPath in
-                        inputRGB.withUnsafeBufferPointer { input in
-                            reference.withUnsafeMutableBufferPointer { output in
-                                selphy_lcms_srgb_to_printer(
-                                    sourcePath,
-                                    printerPath,
-                                    intent.lcmsIntent,
-                                    bpc ? 1 : 0,
-                                    input.baseAddress,
-                                    output.baseAddress,
-                                    inputRGB.count / 3
-                                )
+            // cmsCreateTransform's global BPC flag enables BPC for every
+            // profile in its chain. Use cmsCreateExtendedTransform through
+            // this helper to compare the same per-profile settings ColorSync exposes.
+            var lcmsReferences: [String: [UInt8]] = [:]
+            for sourceBPC in [false, true] {
+                for destinationBPC in [false, true] {
+                    var reference = [UInt8](repeating: 0, count: inputRGB.count)
+                    let succeeded = sourceProfileURL.path.withCString { sourcePath in
+                        profileURL.path.withCString { printerPath in
+                            inputRGB.withUnsafeBufferPointer { input in
+                                reference.withUnsafeMutableBufferPointer { output in
+                                    selphy_lcms_srgb_to_printer_profile_bpc(
+                                        sourcePath,
+                                        printerPath,
+                                        intent.lcmsIntent,
+                                        sourceBPC ? 1 : 0,
+                                        destinationBPC ? 1 : 0,
+                                        input.baseAddress,
+                                        output.baseAddress,
+                                        inputRGB.count / 3
+                                    )
+                                }
                             }
                         }
                     }
+                    XCTAssertEqual(
+                        succeeded, 1,
+                        "LittleCMS per-profile reference failed for \(intent), source BPC=\(sourceBPC), destination BPC=\(destinationBPC)"
+                    )
+                    lcmsReferences["\(sourceBPC)-\(destinationBPC)"] = reference
                 }
-                XCTAssertEqual(succeeded, 1, "LittleCMS diagnostic reference failed for \(intent), BPC=\(bpc)")
-                lcmsReferences[bpc] = reference
             }
 
             for placement in ["none", "source", "destination", "both"] {
@@ -512,9 +521,6 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 XCTAssertTrue(converted, "ColorSync conversion failed for \(intent), BPC placement=\(placement)")
                 guard converted else { continue }
 
-                // Compare every ColorSync placement against BOTH LittleCMS
-                // references. Do not assume that enabling BPC on any sequence
-                // entry has the same semantics as LittleCMS's transform flag.
                 func differenceSummary(against reference: [UInt8]) -> String {
                     let differences = zip(output, reference).map { abs(Int($0) - Int($1)) }
                     let sorted = differences.sorted()
@@ -523,22 +529,46 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                     let maximum = sorted.last ?? 0
                     return "mean=\(String(format: "%.3f", mean)), p95=\(p95), max=\(maximum)"
                 }
-                let referenceWithoutBPC = try XCTUnwrap(lcmsReferences[false])
-                let referenceWithBPC = try XCTUnwrap(lcmsReferences[true])
-                print("BPC placement comparison: intent=\(intent), placement=\(placement), vs-LCMS-BPC-off {\(differenceSummary(against: referenceWithoutBPC))}, vs-LCMS-BPC-on {\(differenceSummary(against: referenceWithBPC))}, sample=\(Array(output.prefix(12)))")
 
-                // ColorSync exposes the CMM's generated conversion data.
-                // Inspect the parametric fragment to see whether a BPC
-                // component was actually inserted, and what values it uses.
-                let parametricKey = kColorSyncTransformParametricConversionData.takeUnretainedValue()
-                if let parametricData = ColorSyncTransformCopyProperty(
-                    transform, parametricKey, nil
-                )?.takeRetainedValue() {
-                    let bpcComponentKey = kColorSyncConversionBPC.takeUnretainedValue()
-                    let bpcComponent = (parametricData as? [CFString: Any])?[bpcComponentKey]
-                    print("ColorSync parametric conversion: intent=\(intent), placement=\(placement), BPC component=\(String(describing: bpcComponent)), data=\(parametricData)")
-                } else {
-                    print("ColorSync parametric conversion data unavailable: intent=\(intent), placement=\(placement)")
+                let matchingKey = "\(sourceBPC)-\(destinationBPC)"
+                let matchingReference = try XCTUnwrap(lcmsReferences[matchingKey])
+                print(
+                    "BPC semantic comparison: intent=\(intent), placement=\(placement), " +
+                    "matching-LCMS-profile-BPC {\(differenceSummary(against: matchingReference))}, " +
+                    "sample=\(Array(output.prefix(12)))"
+                )
+
+                // LUT-based printer transforms need not expose a parametric
+                // fragment. Inspect full/simplified data and transform metadata too.
+                let propertyRequests: [(String, CFString)] = [
+                    ("parametric", kColorSyncTransformParametricConversionData.takeUnretainedValue()),
+                    ("full", kColorSyncTransformFullConversionData.takeUnretainedValue()),
+                    ("simplified", kColorSyncTransformSimplifiedConversionData.takeUnretainedValue()),
+                    ("info", kColorSyncTransformInfo.takeUnretainedValue())
+                ]
+                for (name, key) in propertyRequests {
+                    guard let value = ColorSyncTransformCopyProperty(
+                        transform, key, nil
+                    )?.takeRetainedValue() else {
+                        print("ColorSync transform property unavailable: name=\(name), intent=\(intent), placement=\(placement)")
+                        continue
+                    }
+
+                    let typeID = CFGetTypeID(value)
+                    var detail = "typeID=\(typeID)"
+                    if typeID == CFDataGetTypeID() {
+                        detail += ", dataBytes=\(CFDataGetLength(value as! CFData))"
+                    } else if typeID == CFArrayGetTypeID() {
+                        detail += ", arrayCount=\(CFArrayGetCount(value as! CFArray))"
+                    } else if typeID == CFDictionaryGetTypeID() {
+                        detail += ", dictionaryCount=\(CFDictionaryGetCount(value as! CFDictionary))"
+                    }
+                    if name == "parametric",
+                       let dictionary = value as? [CFString: Any] {
+                        let bpcComponentKey = kColorSyncConversionBPC.takeUnretainedValue()
+                        detail += ", BPCComponent=\(String(describing: dictionary[bpcComponentKey]))"
+                    }
+                    print("ColorSync transform property: name=\(name), intent=\(intent), placement=\(placement), \(detail)")
                 }
 
                 let creatorKey = kColorSyncTransformCreator.takeUnretainedValue()
