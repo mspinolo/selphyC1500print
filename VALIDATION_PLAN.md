@@ -4,7 +4,13 @@ This document separates software correctness from actual printer-color accuracy.
 
 ## 1. Automated software checks
 
-Run on macOS with the project toolchain:
+Install the test-only LittleCMS dependency first, then run on macOS with the project toolchain:
+
+```sh
+brew install little-cms2 pkgconf
+```
+
+
 
 ```sh
 swift test
@@ -24,6 +30,7 @@ The suite currently checks:
 - ICC tag-table bounds and paired A2B/B2A intent availability.
 - Rejection of malformed ICC data.
 - Real-profile ColorSync conversion for perceptual, relative-colorimetric and saturation intents, each with BPC off and on.
+- Numerical comparison against an independent LittleCMS transform for a 32-patch sRGB chart, across all three intents and both BPC states. The current comparison samples patch centers to reduce JPEG edge artifacts.
 - Output JPEG decoding, RGB color model, sRGB tag, dimensions and source-file byte-for-byte preservation.
 - Failure behavior for an invalid printer profile.
 
@@ -51,6 +58,8 @@ The following cases should be added or manually exercised as the implementation 
 The current integration test is a first end-to-end smoke test, not yet the complete matrix above. In particular, the test must eventually cover embedded Adobe RGB, missing-profile fallback, EXIF orientation, grayscale/CMYK rejection, multiple inputs, and atomic cleanup.
 
 ## 3. Validate the transform direction and numeric behavior
+
+A LittleCMS test oracle is now included. It independently transforms the sampled sRGB chart pixels through the same printer profile and compares those expected device RGB values with decoded pixels from the ColorSync-generated JPEG. This checks transform direction, intent selection, BPC propagation and channel/buffer handling. The current acceptance tolerance is mean absolute channel difference <= 3 code values and maximum <= 10 code values at patch centers. If this comparison fails, do not widen the tolerance without first investigating profile intent handling, BPC semantics, pixel formats and JPEG encoding.
 
 The Farbenwerk file is a printer-class RGB/Lab profile with A2B and B2A tables for three intents. The intended compensation path is:
 
