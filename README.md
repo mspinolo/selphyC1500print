@@ -1,29 +1,24 @@
 # SELPHY CP1500 Print
 
-A native macOS utility for preparing JPEG copies for a Canon SELPHY CP1500.
+A native macOS utility for experimental pre-correction of JPEGs for the Canon SELPHY CP1500.
 
-> **Status: early development.** The current milestone adds persistent color-management preferences and structural ICC validation. No conversion or print job has yet been validated on a Mac with the actual printer.
+> **Status: experimental.** ColorSync pre-correction is implemented in source, but it has not yet been compiled or validated with physical prints. Direct printing remains disabled.
 
 ## Current milestone
 
 - Native SwiftUI macOS interface.
 - Persistent printer name, rendering intent, BPC preference and security-scoped ICC bookmark.
-- Structural validation of the selected ICC file (header, declared size, tag-table bounds, device class, color space, PCS and A2B/B2A table pairs).
-- JPEG selection without modifying source files.
+- Structural ICC validation.
+- ColorSync transform from the source JPEG's embedded RGB profile (or assumed sRGB when absent) through PCS to the Farbenwerk printer profile's RGB device values.
+- Temporary JPEG copies, with the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
+- EXIF orientation is applied when decoding; source files are read-only.
+- Temporary sessions are stored under the system temporary directory and abandoned sessions older than 24 hours are removed on the next conversion.
 
-## Color-management findings
+## Color workflow: important caveat
 
-The supplied Farbenwerk profile has been inspected independently: ICC 4.3, class `prtr`, RGB device space, Lab PCS, and A2B/B2A tables for perceptual, media-relative colorimetric and saturation intents.
+Farbenwerk describes the CP1500 profile as a way to pre-adjust the image file to better match the printer's fixed internal color management. The app therefore uses the printer profile as the destination of a ColorSync conversion, then writes the resulting RGB numbers with an sRGB tag so the normal SELPHY path can interpret them.
 
-The profile is a printer profile. The intended pre-adjustment workflow still needs to be confirmed with test prints and the exact Canon/macOS driver path. The app therefore does not yet convert images or submit print jobs. In particular, it must not silently apply a second color conversion after pre-adjustment.
-
-## Planned next steps
-
-1. Implement the ColorSync transform with explicit source profile, Farbenwerk profile, rendering intent and BPC.
-2. Define and verify the output tagging expected by the Canon print queue.
-3. Create disposable print copies and validate color handling through USB.
-4. Add printer discovery and robust print-job lifecycle/cleanup.
-5. Verify Wi-Fi printing using the same macOS print pipeline.
+This is an experimental compensation workflow, not a conventional fully color-managed print pipeline. The output must be compared with uncorrected prints before enabling production use. The app does not yet submit print jobs.
 
 ## Build
 
@@ -34,8 +29,16 @@ swift build
 swift run
 ```
 
-## Privacy and files
+## Next validation steps
 
-- Source JPEGs are read-only; all processing will target temporary copies.
-- ICC profiles are selected by the user and are not bundled as application resources.
-- Temporary print files will be created outside the photo library and removed after use.
+1. Compile and fix any SDK/Swift bridging issues on the target macOS.
+2. Generate test copies using the supplied ICC profile.
+3. Print matched uncorrected/corrected samples through the same CP1500 path.
+4. Compare skin tones, neutral grays, saturated colors and shadow detail.
+5. Only after validation, implement print submission and temporary-file cleanup after job completion.
+
+## Privacy
+
+- Source JPEGs are never modified.
+- The proprietary ICC profile is selected by the user and is not bundled in this repository.
+- Temporary JPEGs are stored outside the photo library.
