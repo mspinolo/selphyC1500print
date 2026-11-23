@@ -186,7 +186,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             sourceProfile = unmanaged.takeRetainedValue()
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("selphy-source-profile-\(UUID().uuidString).icc")
-            try embeddedSourceICC.write(to: url)
+            try (embeddedSourceICC as Data).write(to: url)
             sourceProfileURL = url
         } else {
             guard let unmanaged = ColorSyncProfileCreateWithName(
