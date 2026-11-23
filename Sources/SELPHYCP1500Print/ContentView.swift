@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
@@ -8,15 +9,18 @@ struct ContentView: View {
     @State private var showingProfilePicker = false
     @State private var profileReport: ICCProfileReport?
     @State private var profileError: String?
+    @State private var generatedCopies: [URL] = []
+    @State private var generatedFolder: URL?
+    @State private var isPreparing = false
     @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie JPEG."
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("SELPHY CP1500 Print")
                         .font(.largeTitle.weight(.semibold))
-                    Text("Preparazione e stampa con gestione colore")
+                    Text("Preparazione e pre-correzione colore")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -25,7 +29,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            GroupBox("Profilo ICC") {
+            GroupBox("Profilo ICC Farbenwerk") {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -49,11 +53,8 @@ struct ContentView: View {
                         Divider()
                         Label(report.summary, systemImage: report.isExpectedPrinterProfile ? "checkmark.seal" : "exclamationmark.triangle")
                             .foregroundStyle(report.isExpectedPrinterProfile ? .green : .orange)
-                        Text("ICC \(report.version) · \(report.profileClass) · \(report.colorSpace) → \(report.connectionSpace) · \(report.fileSize.formatted()) byte")
+                        Text("ICC \(report.version) · \(report.profileClass) · \(report.colorSpace) → \(report.connectionSpace)")
                             .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                        Text("Intenti con tabelle A2B/B2A: \(report.availableIntents.map(\.title).joined(separator: ", "))")
-                            .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if let profileError {
                         Label(profileError, systemImage: "exclamationmark.triangle")
@@ -64,69 +65,89 @@ struct ContentView: View {
             }
 
             GroupBox("Gestione colore") {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     Picker("Intento di rendering", selection: $settings.renderingIntent) {
                         ForEach(RenderingIntent.allCases) { intent in
                             Text(intent.title).tag(intent)
                         }
                     }
-                    if let selected = profileReport?.availableIntents.first(where: { $0 == settings.renderingIntent }) {
-                        Text(selected.explanation)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("L'intento verrà verificato rispetto alle tabelle effettivamente presenti nel profilo.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                     Toggle("Compensazione del punto nero (BPC)", isOn: $settings.blackPointCompensation)
-                    Text("La BPC resta disattivata inizialmente: verrà applicata solo dopo aver verificato il comportamento del motore ColorSync con questo profilo.")
+                    Text("La conversione usa ColorSync. In questa fase è una pre-correzione sperimentale: il JPEG risultante viene etichettato sRGB per il successivo trattamento interno della SELPHY.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
 
-            GroupBox("Stampante") {
-                HStack {
-                    TextField("Nome stampante macOS (es. Canon SELPHY CP1500)", text: $settings.selectedPrinterName)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Rileva") { loadPrinters() }
-                }
-                .padding(.vertical, 4)
-            }
-
-            GroupBox("Fotografie") {
+            GroupBox("Fotografie originali") {
                 HStack {
                     Text(selectedPhotos.isEmpty ? "Nessuna fotografia selezionata" : "\(selectedPhotos.count) fotografie selezionate")
                     Spacer()
                     Button("Aggiungi JPEG…") { showingPhotoPicker = true }
-                    Button("Svuota", role: .destructive) { selectedPhotos.removeAll() }
-                        .disabled(selectedPhotos.isEmpty)
+                    Button("Svuota", role: .destructive) {
+                        selectedPhotos.removeAll()
+                        generatedCopies.removeAll()
+                        generatedFolder = nil
+                    }
+                    .disabled(selectedPhotos.isEmpty)
                 }
                 if !selectedPhotos.isEmpty {
                     List(selectedPhotos, id: \.path) { url in
                         Label(url.lastPathComponent, systemImage: "photo")
                             .lineLimit(1)
                     }
-                    .frame(minHeight: 120, maxHeight: 190)
+                    .frame(minHeight: 90, maxHeight: 150)
                 }
-                Text("Gli originali non verranno mai modificati. Le copie di stampa saranno temporanee.")
+                Text("Gli originali vengono soltanto letti. La conversione crea nuovi JPEG temporanei.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 0)
-            HStack {
-                Image(systemName: "info.circle")
-                Text(statusMessage)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Stampa") {
-                    statusMessage = "Stampa non ancora abilitata: prima va validata la pipeline ICC e verificata l'assenza di una seconda conversione colore nel driver."
+            if !generatedCopies.isEmpty {
+                GroupBox("Copie di prova generate") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(generatedCopies, id: \.path) { url in
+                            Label(url.lastPathComponent, systemImage: "doc.richtext")
+                                .lineLimit(1)
+                        }
+                        HStack {
+                            Text("Temporanei: eliminazione automatica dopo 24 ore.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Mostra nel Finder") {
+                                if let generatedFolder {
+                                    NSWorkspace.shared.open(generatedFolder)
+                                }
+                            }
+                        }
+                    }
                 }
-                .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil || settings.selectedPrinterName.isEmpty)
+            }
+
+            Spacer(minLength: 0)
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(statusMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("La stampa diretta non è ancora abilitata.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    prepareCopies()
+                } label: {
+                    if isPreparing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.horizontal, 8)
+                    } else {
+                        Text("Genera copie di prova")
+                    }
+                }
+                .disabled(isPreparing || selectedPhotos.isEmpty || settings.profileBookmark == nil)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -150,6 +171,8 @@ struct ContentView: View {
         case .success(let urls):
             selectedPhotos.append(contentsOf: urls.filter { !selectedPhotos.contains($0) })
             statusMessage = "\(selectedPhotos.count) fotografie in coda."
+            generatedCopies.removeAll()
+            generatedFolder = nil
         case .failure(let error):
             statusMessage = "Selezione fotografie non riuscita: \(error.localizedDescription)"
         }
@@ -168,7 +191,7 @@ struct ContentView: View {
                 profileError = nil
                 statusMessage = report.isExpectedPrinterProfile
                     ? "Profilo ICC caricato e struttura verificata."
-                    : "Profilo caricato; verifica la classe e gli spazi colore prima della conversione."
+                    : "Profilo caricato; controllare la classe e gli spazi colore."
             } catch {
                 profileReport = nil
                 profileError = error.localizedDescription
@@ -179,7 +202,47 @@ struct ContentView: View {
         }
     }
 
-    private func loadPrinters() {
-        statusMessage = "Rilevamento stampanti non ancora implementato; puoi inserire il nome esatto della coda macOS."
+    private func prepareCopies() {
+        do {
+            guard let profileURL = try settings.resolveProfileURL() else {
+                statusMessage = "Seleziona prima il profilo ICC Farbenwerk."
+                return
+            }
+
+            let photoURLs = selectedPhotos
+            let intent = settings.renderingIntent
+            let bpc = settings.blackPointCompensation
+            isPreparing = true
+            statusMessage = "Conversione ColorSync in corso…"
+
+            Task {
+                let hasProfileAccess = profileURL.startAccessingSecurityScopedResource()
+                defer {
+                    if hasProfileAccess {
+                        profileURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                do {
+                    let result = try await Task.detached(priority: .userInitiated) {
+                        try ColorCorrectionService.prepareCopies(
+                            from: photoURLs,
+                            printerProfileURL: profileURL,
+                            intent: intent,
+                            blackPointCompensation: bpc
+                        )
+                    }.value
+
+                    generatedCopies = result.files
+                    generatedFolder = result.folder
+                    statusMessage = "Generate \(result.files.count) copie temporanee. Non sono state inviate alla stampante."
+                } catch {
+                    statusMessage = "Conversione non riuscita: \(error.localizedDescription)"
+                }
+                isPreparing = false
+            }
+        } catch {
+            statusMessage = "Impossibile accedere al profilo ICC: \(error.localizedDescription)"
+        }
     }
 }
