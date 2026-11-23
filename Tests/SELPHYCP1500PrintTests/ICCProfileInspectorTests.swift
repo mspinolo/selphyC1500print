@@ -512,17 +512,41 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 XCTAssertTrue(converted, "ColorSync conversion failed for \(intent), BPC placement=\(placement)")
                 guard converted else { continue }
 
-                // Compare no-BPC placement to LittleCMS without BPC; all other
-                // placements to LittleCMS with BPC. This identifies which
-                // ColorSync sequence entry best matches LittleCMS semantics.
-                let expectedBPC = placement != "none"
-                let reference = try XCTUnwrap(lcmsReferences[expectedBPC])
-                let differences = zip(output, reference).map { abs(Int($0) - Int($1)) }
-                let sorted = differences.sorted()
-                let mean = Double(differences.reduce(0, +)) / Double(max(differences.count, 1))
-                let p95 = sorted[Int(Double(sorted.count - 1) * 0.95)]
-                let maximum = sorted.last ?? 0
-                print("BPC placement comparison: intent=\(intent), placement=\(placement), referenceBPC=\(expectedBPC), mean=\(String(format: "%.3f", mean)), p95=\(p95), max=\(maximum), sample=\(Array(output.prefix(12)))")
+                // Compare every ColorSync placement against BOTH LittleCMS
+                // references. Do not assume that enabling BPC on any sequence
+                // entry has the same semantics as LittleCMS's transform flag.
+                func differenceSummary(against reference: [UInt8]) -> String {
+                    let differences = zip(output, reference).map { abs(Int($0) - Int($1)) }
+                    let sorted = differences.sorted()
+                    let mean = Double(differences.reduce(0, +)) / Double(max(differences.count, 1))
+                    let p95 = sorted.isEmpty ? 0 : sorted[Int(Double(sorted.count - 1) * 0.95)]
+                    let maximum = sorted.last ?? 0
+                    return "mean=\(String(format: "%.3f", mean)), p95=\(p95), max=\(maximum)"
+                }
+                let referenceWithoutBPC = try XCTUnwrap(lcmsReferences[false])
+                let referenceWithBPC = try XCTUnwrap(lcmsReferences[true])
+                print("BPC placement comparison: intent=\(intent), placement=\(placement), vs-LCMS-BPC-off {\(differenceSummary(against: referenceWithoutBPC))}, vs-LCMS-BPC-on {\(differenceSummary(against: referenceWithBPC))}, sample=\(Array(output.prefix(12)))")
+
+                // ColorSync exposes the CMM's generated conversion data.
+                // Inspect the parametric fragment to see whether a BPC
+                // component was actually inserted, and what values it uses.
+                let parametricKey = kColorSyncTransformParametricConversionData.takeUnretainedValue()
+                if let parametricData = ColorSyncTransformCopyProperty(
+                    transform, parametricKey, nil
+                )?.takeRetainedValue() {
+                    let bpcComponentKey = kColorSyncConversionBPC.takeUnretainedValue()
+                    let bpcComponent = (parametricData as? [CFString: Any])?[bpcComponentKey]
+                    print("ColorSync parametric conversion: intent=\(intent), placement=\(placement), BPC component=\(String(describing: bpcComponent)), data=\(parametricData)")
+                } else {
+                    print("ColorSync parametric conversion data unavailable: intent=\(intent), placement=\(placement)")
+                }
+
+                let creatorKey = kColorSyncTransformCreator.takeUnretainedValue()
+                if let creator = ColorSyncTransformCopyProperty(
+                    transform, creatorKey, nil
+                )?.takeRetainedValue() {
+                    print("ColorSync CMM: \(creator)")
+                }
             }
         }
     }
