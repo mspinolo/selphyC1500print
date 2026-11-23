@@ -122,8 +122,10 @@ enum ColorCorrectionService {
         let sourceColorSpace = embeddedICCData == nil ? CGColorSpace(name: CGColorSpace.sRGB)! : imageColorSpace
 
         let sourceProfile: ColorSyncProfile
-        if let iccData = embeddedICCData,
-           let profile = ColorSyncProfileCreate(iccData, nil)?.takeRetainedValue() {
+        if let iccData = embeddedICCData {
+            guard let profile = ColorSyncProfileCreate(iccData, nil)?.takeRetainedValue() else {
+                throw CorrectionError.profileLoad("profilo ICC incorporato nell'immagine non valido")
+            }
             sourceProfile = profile
         } else {
             sourceProfile = try makeSRGBProfile()
