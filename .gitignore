@@ -4,3 +4,7 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
+
+# ICC profiles are licensed/user-supplied assets; never commit them.
+*.icc
+*.icm
