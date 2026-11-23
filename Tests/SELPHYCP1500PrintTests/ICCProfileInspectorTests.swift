@@ -455,6 +455,25 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let destinationTag = kColorSyncTransformPCSToDevice.takeUnretainedValue()
 
         for intent in [RenderingIntent.relativeColorimetric, .perceptual] {
+            var blackPointValues = [Double](repeating: .nan, count: 14)
+            let blackPointInspection = sourceProfileURL.path.withCString { sourcePath in
+                profileURL.path.withCString { printerPath in
+                    blackPointValues.withUnsafeMutableBufferPointer { values in
+                        selphy_lcms_inspect_black_points(sourcePath, printerPath, intent.lcmsIntent, values.baseAddress)
+                    }
+                }
+            }
+            XCTAssertEqual(blackPointInspection, 1, "LittleCMS black-point estimation failed for intent=\(intent)")
+            if blackPointInspection == 1 {
+                print(
+                    "LCMS black-point diagnostics: intent=\(intent), " +
+                    "sourceDetectedXYZ=\(Array(blackPointValues[0...2])), sourceL*=\(blackPointValues[3]), " +
+                    "destinationDetectedXYZ=\(Array(blackPointValues[4...6])), destinationL*=\(blackPointValues[7]), " +
+                    "sourceMediaBlackPointTagXYZ=\(Array(blackPointValues[8...10])), " +
+                    "destinationMediaBlackPointTagXYZ=\(Array(blackPointValues[11...13]))"
+                )
+            }
+
             // LittleCMS BPC is applied at a PCS connection. For this two-profile
             // chain, its implementation evaluates the connection while processing
             // profile index 1 (BPC[1]); the helper maps the source sequence option
@@ -580,8 +599,10 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                         let summaries = components.enumerated().map { index, component -> String in
                             if let dictionary = component as? [CFString: Any] {
                                 let keys = dictionary.keys.map { String(describing: $0) }.sorted()
-                                let bpc = String(describing: dictionary[bpcComponentKey] ?? "nil")
-                                return "\(index):dict(keys=\(keys),BPC=\(bpc))"
+                                let bpcObject = dictionary[bpcComponentKey]
+                                let bpc = String(describing: bpcObject ?? "nil")
+                                let bpcNumbers = (bpcObject as? [NSNumber])?.map { $0.doubleValue }
+                                return "\(index):dict(keys=\(keys),BPC=\(bpc),BPCFloatValues=\(String(describing: bpcNumbers)))"
                             }
                             if let data = component as? Data {
                                 return "\(index):data(bytes=\(data.count))"
