@@ -24,6 +24,7 @@ enum ColorCorrectionService {
         case profileLoad(String)
         case transformCreation
         case transformFailed(URL)
+        case pixelTransformFailed
         case bitmapContext
         case imageEncoding(URL)
 
@@ -39,6 +40,8 @@ enum ColorCorrectionService {
                 return "ColorSync non è riuscito a creare la trasformazione ICC."
             case .transformFailed(let url):
                 return "Conversione ColorSync non riuscita per \(url.lastPathComponent)."
+            case .pixelTransformFailed:
+                return "Conversione ColorSync del buffer RGB non riuscita."
             case .bitmapContext:
                 return "Impossibile creare il buffer bitmap RGB."
             case .imageEncoding(let url):
@@ -88,7 +91,7 @@ enum ColorCorrectionService {
         return Result(files: outputs, folder: sessionFolder)
     }
 
-    private static func loadProfile(at url: URL) throws -> ColorSyncProfile {
+    static func loadProfile(at url: URL) throws -> ColorSyncProfile {
         var cfError: Unmanaged<CFError>?
         guard let unmanaged = ColorSyncProfileCreateWithURL(url as CFURL, &cfError) else {
             let detail = cfError?.takeRetainedValue().localizedDescription ?? "errore sconosciuto"
@@ -126,15 +129,6 @@ enum ColorCorrectionService {
             sourceProfile = try makeSRGBProfile()
         }
 
-        guard let transform = makeTransform(
-            sourceProfile: sourceProfile,
-            printerProfile: printerProfile,
-            intent: intent,
-            blackPointCompensation: blackPointCompensation
-        ) else {
-            throw CorrectionError.transformCreation
-        }
-
         let width = image.width
         let height = image.height
         let bytesPerRow = width * 4
@@ -159,26 +153,15 @@ enum ColorCorrectionService {
         }
         guard sourceContextCreated else { throw CorrectionError.bitmapContext }
 
-        var correctedPixels = Data(count: byteCount)
-        let converted = correctedPixels.withUnsafeMutableBytes { destination in
-            sourcePixels.withUnsafeBytes { source in
-                ColorSyncTransformConvert(
-                    transform,
-                    width,
-                    height,
-                    destination.baseAddress,
-                    kColorSync8BitInteger,
-                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
-                    bytesPerRow,
-                    source.baseAddress,
-                    kColorSync8BitInteger,
-                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
-                    bytesPerRow,
-                    nil
-                )
-            }
-        }
-        guard converted else { throw CorrectionError.transformFailed(sourceURL) }
+        let correctedPixels = try convertRGBPixels(
+            sourcePixels,
+            width: width,
+            height: height,
+            sourceProfile: sourceProfile,
+            printerProfile: printerProfile,
+            intent: intent,
+            blackPointCompensation: blackPointCompensation
+        )
 
         // Deliberately re-tag the corrected numeric RGB values as sRGB. The
         // SELPHY has a fixed internal color pipeline; the profile is used to
@@ -218,6 +201,57 @@ enum ColorCorrectionService {
         guard CGImageDestinationFinalize(destination) else {
             throw CorrectionError.imageEncoding(outputURL)
         }
+    }
+
+    /// Applies the same production ColorSync transform to a tightly packed
+    /// 32-bit big-endian RGBX buffer. Kept internal so tests can compare the
+    /// numeric transform output before lossy JPEG encoding.
+    static func convertRGBPixels(
+        _ sourcePixels: Data,
+        width: Int,
+        height: Int,
+        sourceProfile: ColorSyncProfile,
+        printerProfile: ColorSyncProfile,
+        intent: RenderingIntent,
+        blackPointCompensation: Bool
+    ) throws -> Data {
+        guard width > 0, height > 0,
+              width <= Int.max / 4,
+              height <= Int.max / (width * 4),
+              sourcePixels.count == width * height * 4 else {
+            throw CorrectionError.bitmapContext
+        }
+        guard let transform = makeTransform(
+            sourceProfile: sourceProfile,
+            printerProfile: printerProfile,
+            intent: intent,
+            blackPointCompensation: blackPointCompensation
+        ) else {
+            throw CorrectionError.transformCreation
+        }
+
+        let bytesPerRow = width * 4
+        var correctedPixels = Data(count: sourcePixels.count)
+        let converted = correctedPixels.withUnsafeMutableBytes { destination in
+            sourcePixels.withUnsafeBytes { source in
+                ColorSyncTransformConvert(
+                    transform,
+                    width,
+                    height,
+                    destination.baseAddress,
+                    kColorSync8BitInteger,
+                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
+                    bytesPerRow,
+                    source.baseAddress,
+                    kColorSync8BitInteger,
+                    UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue),
+                    bytesPerRow,
+                    nil
+                )
+            }
+        }
+        guard converted else { throw CorrectionError.pixelTransformFailed }
+        return correctedPixels
     }
 
     private static func makeOrientedImage(from source: CGImageSource) -> CGImage? {
