@@ -11,6 +11,11 @@ let package = Package(
         .executableTarget(
             name: "SELPHYCP1500Print",
             path: "Sources/SELPHYCP1500Print"
+        ),
+        .testTarget(
+            name: "SELPHYCP1500PrintTests",
+            dependencies: ["SELPHYCP1500Print"],
+            path: "Tests/SELPHYCP1500PrintTests"
         )
     ]
 )
