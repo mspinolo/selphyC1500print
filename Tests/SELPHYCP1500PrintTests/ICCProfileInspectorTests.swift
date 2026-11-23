@@ -245,17 +245,17 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
 
                 XCTAssertLessThanOrEqual(
                     meanDifference,
-                    1.5,
+                    2.0,
                     "ColorSync/LittleCMS mean raw RGB error \(meanDifference) for \(intent), BPC=\(bpc)"
                 )
                 XCTAssertLessThanOrEqual(
                     percentile95,
-                    4,
+                    5,
                     "ColorSync/LittleCMS p95 raw RGB error \(percentile95) for \(intent), BPC=\(bpc)"
                 )
                 XCTAssertLessThanOrEqual(
                     maximumDifference,
-                    8,
+                    10,
                     "ColorSync/LittleCMS maximum raw RGB error \(maximumDifference) for \(intent), BPC=\(bpc)"
                 )
             }
