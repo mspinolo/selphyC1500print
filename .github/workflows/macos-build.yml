@@ -17,5 +17,12 @@ jobs:
         run: swift --version
       - name: Build package
         run: swift build -v
+      - name: Download licensed Farbenwerk test profile
+        run: |
+          curl --silent --show-error --fail --location \
+            "https://files.farbenwerk.com/dl/icc-dl-fw/ICC-Profile165-CP1500.icc" \
+            --output "$RUNNER_TEMP/ICC-Profile165-CP1500.icc"
       - name: Run automated tests
+        env:
+          SELPHY_TEST_PRINTER_PROFILE: ${{ runner.temp }}/ICC-Profile165-CP1500.icc
         run: swift test -v
