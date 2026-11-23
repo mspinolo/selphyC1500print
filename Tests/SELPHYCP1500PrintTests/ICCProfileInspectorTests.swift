@@ -206,7 +206,6 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 intentKey: kColorSyncRenderingIntentPerceptual.takeUnretainedValue(),
                 tagKey: kColorSyncTransformPCSToDevice.takeUnretainedValue()
             ]
-            _ = intentKey
             guard let transform = ColorSyncTransformCreate(
                 [sourceEntry as CFDictionary, destinationEntry as CFDictionary] as CFArray,
                 nil
@@ -232,9 +231,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let rgbLayout = UInt32(kColorSyncAlphaNone.rawValue)
         let identityRGBX = convert(source: sRGBProfile, destination: sRGBProfile, layout: rgbxLayout, bytesPerPixel: 4)
         let printerRGBX = convert(source: sRGBProfile, destination: printerProfile, layout: rgbxLayout, bytesPerPixel: 4)
+        let identityRGB = convert(source: sRGBProfile, destination: sRGBProfile, layout: rgbLayout, bytesPerPixel: 3)
         let printerRGB = convert(source: sRGBProfile, destination: printerProfile, layout: rgbLayout, bytesPerPixel: 3)
-        print("ColorSync diagnostic results: sRGB->sRGB RGBX=\(identityRGBX), sRGB->printer RGBX=\(printerRGBX), sRGB->printer packed RGB=\(printerRGB)")
-        XCTAssertTrue(identityRGBX, "Even an sRGB identity transform must work with the production RGBX layout")
+        print("ColorSync diagnostic results: sRGB->sRGB RGBX=\(identityRGBX), sRGB->printer RGBX=\(printerRGBX), sRGB->sRGB packed RGB=\(identityRGB), sRGB->printer packed RGB=\(printerRGB)")
+        XCTAssertTrue(identityRGB, "Packed RGB identity transform must succeed")
+        XCTAssertTrue(printerRGB, "Packed RGB transform to the Farbenwerk profile must succeed")
     }
     func testEndToEndConversionWithRealFarbenwerkProfile() throws {
         guard let profilePath = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
