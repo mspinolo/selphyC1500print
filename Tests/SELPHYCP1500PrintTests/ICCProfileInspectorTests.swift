@@ -175,6 +175,67 @@ final class ICCProfileInspectorTests: XCTestCase {
 }
 
 final class ColorCorrectionIntegrationTests: XCTestCase {
+    func testColorSyncDiagnosticTransforms() throws {
+        let profileURL = try realProfileURL()
+        let printerProfile = try ColorCorrectionService.loadProfile(at: profileURL)
+        guard let unmanagedSRGB = ColorSyncProfileCreateWithName(
+            kColorSyncSRGBProfile.takeUnretainedValue()
+        ) else {
+            return XCTFail("System sRGB ColorSync profile unavailable")
+        }
+        let sRGBProfile = unmanagedSRGB.takeRetainedValue()
+        let report = try ICCProfileInspector.inspect(url: profileURL)
+        print("Diagnostic printer ICC header: class=\(report.profileClass), colorSpace=\(report.colorSpace), PCS=\(report.connectionSpace)")
+
+        func convert(
+            source: ColorSyncProfile,
+            destination: ColorSyncProfile,
+            layout: UInt32,
+            bytesPerPixel: Int
+        ) -> Bool {
+            let profileKey = kColorSyncProfile.takeUnretainedValue()
+            let intentKey = kColorSyncRenderingIntent.takeUnretainedValue()
+            let tagKey = kColorSyncTransformTag.takeUnretainedValue()
+            let sourceEntry: [CFString: Any] = [
+                profileKey: source,
+                intentKey: kColorSyncRenderingIntentPerceptual.takeUnretainedValue(),
+                tagKey: kColorSyncTransformDeviceToPCS.takeUnretainedValue()
+            ]
+            let destinationEntry: [CFString: Any] = [
+                profileKey: destination,
+                intentKey: kColorSyncRenderingIntentPerceptual.takeUnretainedValue(),
+                tagKey: kColorSyncTransformPCSToDevice.takeUnretainedValue()
+            ]
+            _ = intentKey
+            guard let transform = ColorSyncTransformCreate(
+                [sourceEntry as CFDictionary, destinationEntry as CFDictionary] as CFArray,
+                nil
+            )?.takeRetainedValue() else {
+                print("Diagnostic transform creation failed")
+                return false
+            }
+            let input = Data([128, 64, 32] + (bytesPerPixel == 4 ? [0] : []))
+            var output = Data(count: bytesPerPixel)
+            return output.withUnsafeMutableBytes { dst in
+                input.withUnsafeBytes { src in
+                    ColorSyncTransformConvert(
+                        transform, 1, 1,
+                        dst.baseAddress, kColorSync8BitInteger, layout, bytesPerPixel,
+                        src.baseAddress, kColorSync8BitInteger, layout, bytesPerPixel,
+                        nil
+                    )
+                }
+            }
+        }
+
+        let rgbxLayout = UInt32(kColorSyncByteOrder32Big) | UInt32(kColorSyncAlphaNoneSkipLast.rawValue)
+        let rgbLayout = UInt32(kColorSyncAlphaNone.rawValue)
+        let identityRGBX = convert(source: sRGBProfile, destination: sRGBProfile, layout: rgbxLayout, bytesPerPixel: 4)
+        let printerRGBX = convert(source: sRGBProfile, destination: printerProfile, layout: rgbxLayout, bytesPerPixel: 4)
+        let printerRGB = convert(source: sRGBProfile, destination: printerProfile, layout: rgbLayout, bytesPerPixel: 3)
+        print("ColorSync diagnostic results: sRGB->sRGB RGBX=\(identityRGBX), sRGB->printer RGBX=\(printerRGBX), sRGB->printer packed RGB=\(printerRGB)")
+        XCTAssertTrue(identityRGBX, "Even an sRGB identity transform must work with the production RGBX layout")
+    }
     func testEndToEndConversionWithRealFarbenwerkProfile() throws {
         guard let profilePath = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
             throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run real-profile ColorSync integration tests.")
