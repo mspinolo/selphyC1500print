@@ -20,6 +20,17 @@ int selphy_lcms_srgb_to_printer(
     size_t pixel_count
 );
 
+/// Estimate effective source/destination black points and report mediaBlackPoint tags.
+/// Output layout: source XYZ [0...2], source L* [3], destination XYZ [4...6],
+/// destination L* [7], source mediaBlackPoint XYZ [8...10], destination tag [11...13].
+/// Missing mediaBlackPoint tags are returned as NaN.
+int selphy_lcms_inspect_black_points(
+    const char *source_profile_path,
+    const char *printer_profile_path,
+    uint32_t rendering_intent,
+    double *output_values
+);
+
 /// LittleCMS reference with BPC controlled independently for source and destination profiles.
 int selphy_lcms_srgb_to_printer_profile_bpc(
     const char *source_profile_path,
