@@ -23,6 +23,21 @@ The README describes the following as implemented in source:
 
 **Important:** these are implementation claims, not a declaration that the project has passed a clean build, CI, numerical acceptance thresholds, or physical-print validation. Verify each item before marking it validated.
 
+## Current validation findings (2026-11-24)
+
+Latest verified CI: GitHub Actions run [45289743953](https://github.com/mspinolo/selphyC1500print/actions/runs/45289743953) (build 72), commit `51f358f`.
+
+- Swift package compilation succeeded and the Farbenwerk profile download succeeded.
+- Automated tests: 18 executed, 13 passed, 5 failed. All five failures are assertions in `testColorSyncMatchesIndependentLittleCMSReference`; the other 13 tests passed.
+- Relative-colorimetric, BPC off: mean raw RGB error 0.594, P95 1, max 3.
+- Relative-colorimetric, BPC on: mean 8.823, P95 27, max 39. Worst sample: input `[230, 180, 217]`, ColorSync channel value 248 versus LittleCMS 209.
+- Perceptual: max raw RGB error 11 for both BPC off and on, exceeding the unchanged limit of 10 by one level.
+- The standard LittleCMS transform's BPC on/off probe changed 81 of 96 output bytes.
+- Controlled `cmsCreateExtendedTransform` probes establish the observed mapping for the two-profile chain (sRGB/source profile → printer profile): `[true, false]` matches standard `cmsCreateTransform` with BPC disabled; `[false, true]` and `[true, true]` match standard BPC enabled. Thus the second array entry is the effective BPC entry for this chain. Preserve this as an experimentally verified regression assertion; do not infer it from parameter names alone.
+- ColorSync sequence-placement diagnostics do not reproduce LittleCMS equivalently: no BPC is close to LittleCMS without BPC (mean 0.594, P95 1, max 3), while source-only, destination-only, and both placements remain materially different. In particular, the current production configuration enables BPC on both ColorSync sequence entries, and its relative-colorimetric output does not match the LittleCMS standard BPC oracle. This is an unresolved cross-CMM semantic difference, not evidence that either engine is necessarily wrong.
+
+**Production status:** no change to `ColorCorrectionService.swift` or the printing workflow is authorized while this discrepancy is under investigation. Test thresholds must remain unchanged.
+
 ## Roadmap
 
 ### 1. Repository and build audit
@@ -30,7 +45,7 @@ The README describes the following as implemented in source:
 - [ ] Review the source tree, package/project configuration, test targets, and CI workflows.
 - [ ] Build on a supported macOS/Xcode environment.
 - [ ] Run the complete test suite from a clean checkout.
-- [ ] Run the GitHub Actions workflow and resolve failures.
+- [ ] Run the GitHub Actions workflow and resolve failures. Latest run 45289743953 builds successfully but has 5 numerical comparison failures; see Current validation findings.
 - [ ] Record the tested macOS, Xcode, and Swift versions.
 - [ ] Confirm that no proprietary ICC profile, personal photo, or generated print output is committed unintentionally.
 
@@ -41,7 +56,7 @@ The README describes the following as implemented in source:
 - [ ] Review the ColorSync transform construction and source/destination profile handling.
 - [ ] Confirm the exact semantics of the Farbenwerk CP1500 profile and the intended pre-correction workflow.
 - [ ] Verify all supported rendering intents: perceptual, relative colorimetric, and saturation.
-- [ ] Verify black-point compensation behavior where supported; document any ColorSync/API limitation rather than assuming equivalence with LittleCMS.
+- [ ] Verify black-point compensation behavior where supported; document any ColorSync/API limitation rather than assuming equivalence with LittleCMS. LittleCMS two-profile probe confirms that BPC array entry 1 (the printer-profile entry) reproduces standard cmsCreateTransform BPC; ColorSync placement equivalence remains unresolved.
 - [ ] Review assumptions for untagged JPEGs, embedded RGB profiles, grayscale images, unsupported color spaces, and malformed profiles.
 - [ ] Verify alpha handling, bit depth, orientation, metadata preservation, and JPEG quality settings.
 - [ ] Document why converted RGB values are tagged sRGB for the printer's fixed internal color pipeline, and the limitations of this experimental approach.
@@ -53,7 +68,7 @@ The README describes the following as implemented in source:
 - [ ] Keep deterministic synthetic fixtures for neutral ramps, RGB/CMY primaries, intermediate colors, and skin-tone-like patches.
 - [ ] Test ICC parsing, invalid/truncated profiles, missing profiles, and unsupported image formats.
 - [ ] Test each rendering intent and black-point-compensation combination.
-- [ ] Compare ColorSync results with an independent LittleCMS oracle where the transforms are semantically comparable.
+- [ ] Compare ColorSync results with an independent LittleCMS oracle only where transform semantics are demonstrated to be comparable. Keep BPC-on comparisons diagnostic until ColorSync's sequence-entry semantics are established.
 - [ ] Define numeric tolerances and report differences in a meaningful color space (preferably ΔE in Lab/ΔE00, where the test setup permits).
 - [ ] Verify output dimensions, JPEG decodability, output profile tag, EXIF orientation, and source-file byte-for-byte immutability.
 - [ ] Test failure paths, temporary-file cleanup, and stale-session cleanup.
@@ -107,12 +122,12 @@ The README describes the following as implemented in source:
 
 - `Tests/Fixtures/CP1500-ICC-Test-10x15.svg`: synthetic 10 × 15 cm diagnostic chart. It is not a certified color target.
 - Natural-skin-tone photograph: to be added manually under `Tests/Fixtures/`. Treat it as a qualitative visual reference, not a calibrated measurement target.
-- Farbenwerk CP1500 ICC profile: user-supplied/licensed input; do not commit it to the repository.
+- Farbenwerk CP1500 ICC profile: user-supplied/licensed project asset currently kept at repository root by explicit user decision. Do not move or remove it; do not reopen this repository-placement decision. Avoid copying it into CI artifacts or logs.
 
 ## Working rules
 
 1. Do not overwrite or modify user source images.
 2. Do not claim color accuracy based only on a successful build or a passing software test.
-3. Keep proprietary ICC assets and personal photographs out of public commits unless their licensing and publication are explicitly cleared.
+3. Keep personal photographs and generated print outputs out of public commits unless explicitly cleared. The Farbenwerk ICC profile at repository root is an explicit user-authorized exception; preserve its current location.
 4. Update this roadmap when a task is completed, deferred, or blocked; distinguish **implemented**, **tested**, and **validated by physical print**.
 5. Prefer small, reviewable commits and keep the README consistent with actual behavior.
