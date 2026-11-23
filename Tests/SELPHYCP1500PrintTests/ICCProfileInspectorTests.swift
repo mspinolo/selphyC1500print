@@ -241,7 +241,14 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 let meanDifference = Double(absoluteDifferences.reduce(0, +)) / Double(absoluteDifferences.count)
                 let percentile95 = sortedDifferences[Int(Double(sortedDifferences.count - 1) * 0.95)]
                 let maximumDifference = sortedDifferences.last ?? 0
-                print("ICC numeric comparison: intent=\(intent), BPC=\(bpc), mean=\(meanDifference), p95=\(percentile95), max=\(maximumDifference)")
+                let worstIndex = absoluteDifferences.firstIndex(of: maximumDifference) ?? 0
+                let worstSample = worstIndex / 3
+                let worstChannel = worstIndex % 3
+                let worstOffset = sampleOffsets[worstSample]
+                let worstInput = Array(source.pixels[worstOffset..<(worstOffset + 3)])
+                let worstColorSync = colorSyncRGBX[worstOffset + worstChannel]
+                let worstLittleCMS = referenceRGB[worstSample * 3 + worstChannel]
+                print("ICC numeric comparison: intent=\(intent), BPC=\(bpc), mean=\(meanDifference), p95=\(percentile95), max=\(maximumDifference), worstPatch=\(worstSample), channel=\(worstChannel), input=\(worstInput), ColorSync=\(worstColorSync), LittleCMS=\(worstLittleCMS)")
 
                 XCTAssertLessThanOrEqual(
                     meanDifference,
