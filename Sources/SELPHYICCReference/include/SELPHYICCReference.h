@@ -31,7 +31,7 @@ int selphy_lcms_inspect_black_points(
     double *output_values
 );
 
-/// LittleCMS reference with BPC controlled independently for source and destination profiles.
+/// Diagnostic cmsCreateExtendedTransform reference with its two per-profile BPC entries controlled independently.
 int selphy_lcms_srgb_to_printer_profile_bpc(
     const char *source_profile_path,
     const char *printer_profile_path,
