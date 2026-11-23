@@ -38,7 +38,7 @@ final class ICCProfileInspectorTests: XCTestCase {
     }
 
     func testReadsPrinterProfileHeaderAndIntentTags() throws {
-        var data = Self.minimalICCProfile(tagSignatures: [
+        let data = Self.minimalICCProfile(tagSignatures: [
             "A2B0", "B2A0", "A2B1", "B2A1", "A2B2", "B2A2"
         ])
         let url = try temporaryFile(data: data)
