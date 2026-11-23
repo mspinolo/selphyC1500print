@@ -20,6 +20,24 @@ Farbenwerk describes the CP1500 profile as a way to pre-adjust the image file to
 
 This is an experimental compensation workflow, not a conventional fully color-managed print pipeline. The output must be compared with uncorrected prints before enabling production use. The app does not yet submit print jobs.
 
+## Automated validation
+
+Run the automated suite on macOS:
+
+```sh
+swift test
+```
+
+The suite covers ICC header/tag-table parsing, malformed profiles, and end-to-end ColorSync conversion. The real-profile integration tests are skipped unless the licensed Farbenwerk profile is made available locally:
+
+```sh
+SELPHY_TEST_PRINTER_PROFILE="/path/to/ICC-Profile165-CP1500.icc" swift test
+```
+
+The integration test exercises all three supported rendering intents with BPC both off and on, checks that output JPEGs decode at the expected dimensions and are tagged sRGB, and verifies that source bytes remain unchanged. The profile is deliberately not committed to the public repository or uploaded as a CI artifact.
+
+These automated checks do **not** establish that the pre-correction model produces more accurate physical prints. That requires a controlled print comparison and, ideally, measured patches from the CP1500.
+
 ## Build
 
 Requires macOS 14 or later and Xcode/Swift 5.9 or later.
