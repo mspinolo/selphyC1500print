@@ -135,6 +135,9 @@ struct ContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
         }
+        // Explicit, appearance-aware background: without it the pane showed white under light-coloured
+        // text in dark mode when the view was not drawn inside a window (and never depends on the host).
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var generatedStrip: some View {
