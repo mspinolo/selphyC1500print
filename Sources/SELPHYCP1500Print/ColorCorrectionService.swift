@@ -261,9 +261,8 @@ enum ColorCorrectionService {
             throw CorrectionError.imageEncoding(outputURL)
         }
 
-        // Lossless on purpose: the pre-correction amplifies chroma differences between
-        // neighbouring areas, and JPEG chroma subsampling/quantisation measurably
-        // degraded them (up to ~11 DeltaE2000 at patch centres on the test chart).
+        // Lossless on purpose: a precision pre-correction should not be followed by a
+        // lossy codec. (The actual JPEG penalty has not been measured yet: ROADMAP M2.)
         CGImageDestinationAddImage(destination, correctedImage, nil)
         guard CGImageDestinationFinalize(destination) else {
             throw CorrectionError.imageEncoding(outputURL)

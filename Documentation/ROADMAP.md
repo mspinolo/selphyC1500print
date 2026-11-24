@@ -55,7 +55,8 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 **Exit:** one production engine, documented BPC semantics, DeltaE00 tolerances recorded in the tests.
 
 ### M2 - Pipeline hardening
-- [x] 16-bit internal processing in the core (single final rounding); lossless PNG output. Evidence: with JPEG q=0.98 the macOS end-to-end check showed up to 11.3 DeltaE2000 at flat patch centres (neutral and skin patches next to patches of different corrected chroma), while the buffer was byte-identical to the core.
+- [x] 16-bit internal processing in the core (single final rounding); lossless PNG output as a precaution.
+- [ ] Measure the real JPEG penalty (encode the corrected chart as JPEG at several qualities and compare in DeltaE2000) before deciding whether JPEG output should return as an option. Note: an earlier suspicion that JPEG caused 5-11 DeltaE errors was wrong; the cause was a test bug (CoreGraphics bottom-left origin), fixed.
 - [ ] 16-bit decode of the source (JPEG sources are 8-bit; matters for future TIFF/HEIC input); correct output resolution metadata.
 - [ ] Source handling: embedded Adobe RGB / Display P3 / untagged (explicit sRGB assumption surfaced in UI), grayscale and CMYK (convert or reject clearly), EXIF orientation 1-8, alpha, large images, memory bounds.
 - [ ] Tests for every case in the validation matrix, using small deterministic fixtures; fix the 3-byte packing loops (performance) or replace them.

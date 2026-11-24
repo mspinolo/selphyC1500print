@@ -10,7 +10,7 @@ A native macOS utility for experimental pre-correction of JPEGs for the Canon SE
 - Persistent printer name, rendering intent, BPC preference and security-scoped ICC bookmark.
 - Structural ICC validation.
 - LittleCMS transform (16-bit internally) from the source JPEG's embedded RGB profile (or assumed sRGB when absent) through PCS to the Farbenwerk printer profile's RGB device values. Black point compensation follows the ICC rules: always applied for perceptual/saturation with a v4 profile, optional for relative colorimetric.
-- Temporary lossless PNG copies (JPEG output was measured to degrade the pre-corrected colours by up to ~11 DeltaE2000), with the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
+- Temporary lossless PNG copies (no lossy codec after the correction), with the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
 - EXIF orientation is applied when decoding; source files are read-only.
 - Temporary sessions are stored under the system temporary directory and abandoned sessions older than 24 hours are removed on the next conversion.
 

@@ -148,9 +148,13 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
     private let neutralPatches = [2, 3, 4, 5, 6, 7]
     private let skinPatches = [16, 17, 18]
 
+    /// Byte offsets of the centre of each chart patch, indexed like the colour table in
+    /// `makeColorChartJPEG` (patch = row * 8 + column). CoreGraphics draws with the origin
+    /// at the bottom left, so drawn row 0 ends up in the *bottom* image row of the decoded
+    /// (top-left origin) pixels.
     private func patchOffsets() -> [Int] {
         (0..<4).flatMap { row in
-            (0..<8).map { column in ((row * 12 + 6) * 64 + (column * 8 + 4)) * 4 }
+            (0..<8).map { column in (((3 - row) * 12 + 6) * 64 + (column * 8 + 4)) * 4 }
         }
     }
 
