@@ -43,7 +43,7 @@ question on neutral rendering.
    `cc -O2 -shared -fPIC -DHasTHREADS=1 -DHAVE_GMTIME_R=1 -ISources/SELPHYColorCore/include -ISources/CLittleCMS/include -ISources/CLittleCMS/src Sources/SELPHYColorCore/selphy_color_core.c Sources/CLittleCMS/src/*.c -lm -o build/libselphy_core_shared.dylib` (after `mkdir -p build`)
    (tested on Linux only). Check the tools: `python3 -m unittest discover -s validation/tests`.
 2. **Scanner chain check.** Scan the ColorChecker Classic with exactly the settings you will use
-   for the prints. Get the reference Lab (D50) of *your* chart (datasheet, X-Rite software or
+   for the prints. Get the reference Lab (D50) of *your* chart (**open item: the owner is finding the chart's version/year**) (datasheet, X-Rite software or
    BabelColor; values differ before/after 2014): fill `validation/colorchecker_reference_template.csv`.
    Read, in any image viewer, the pixel coordinates of the centres of dark skin (top-left),
    bluish green (top-right), white (bottom-left), black (bottom-right), chart upright, then:

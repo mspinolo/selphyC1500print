@@ -110,11 +110,16 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [ ] Choose the route (system print dialog, AirPrint/IPP, or hand-off to the Canon app); sizing/fit/borders for 100 x 148 mm; job status, errors, cancellation; temp-file lifetime.
 - [ ] Ship behind an "experimental, vendor-trusted colour model" notice.
 
+### M3.3 - Guided validation assistant (proposed, awaiting the owner's decision)
+- [ ] Wizard in the app built on `Documentation/PHYSICAL_VALIDATION.md`: what to print and how, ordered file export with blind codes, guided loading of the scans, analysis and report with the gates. Proposed to be built *after* the first real session, so that the procedure is frozen by experience and the Python tools serve as the reference implementation to cross-check against. Depends on: ColorChecker reference version (owner), the M4 print route.
+
 ### M5 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
 
 ## Track P - Physical validation (optional, owner-scheduled)
 - [ ] **To check at the first physical print (owner note, 2026-11-24):** on the SELPHY CP1500 the print settings cannot be changed, except for switching colour management off. Verify that the print route (system dialog / Canon app) really has colour management **off**, so the pre-corrected sRGB-tagged file is not converted a second time; compare a print with and without that setting to confirm. M4 must tell the user to switch it off.
+- [ ] **Owner to do:** find the version/production year of the ColorChecker Classic (it decides the reference Lab values) and pass it on; then the matching reference file goes into `validation/` and `check_scanner.py` can be run. Also needed before print day: how VueScan outputs the scan (profile applied or not), and the printer's native raster.
+
 Not blocking. Procedure and tools: `Documentation/PHYSICAL_VALIDATION.md` (`validation/`: chart generator, scan analysis, scanner check, report, self-tested with synthetic scans). First session planned for the owner's physical prints (13 sheets, ColorChecker-checked scanner chain, no repeats). Original sketch: matched uncorrected/corrected chart set (ramps, shadow steps, skin tones, primaries, gradient, one photograph) at the printer's native raster, 3 repeats, same paper pack and settings, randomised order, neutral light, measured patches if an instrument is available; results in `Documentation/validation/`. Use it to confirm or revise the default intent/BPC and the print-path identity assumption.
 
 ## Working rules
