@@ -118,7 +118,15 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [ ] Scanner side: accept the user's own scanner profile (embedded or separate) and explain the "profile applied twice or not at all" trap; the chain-error check on the target gates how far the results are trusted.
 - [ ] Depends on: the ColorChecker reference version (owner), the M4 print route.
 
-### M5 - Release
+### M5 - Window redesign and app icon (after M4)
+Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattractive, unprofessional and badly sized.
+- [ ] Observed defects to fix: minimum height 900 pt does not fit a laptop screen; everything sits in one very tall scrolling column; pickers and group boxes stretch across the full width while the preview is small in a sea of empty space; dense paragraphs of explanatory text compete with the controls; plain group boxes with no hierarchy; the title area is cut off when scrolled.
+- [ ] New layout in native macOS style (for example sidebar/steps or a two-pane window: photos and settings on one side, a large preview on the other), sensible default and minimum size for small screens, remembered window size, thumbnails for the photo list, drag and drop of photos and profile, explanatory text moved into help popovers/disclosures, dark mode, keyboard access and accessibility labels, both languages checked for fit (Italian is longer).
+- [ ] Review loop: CI renders the main window at several sizes in light/dark and in English/Italian (SwiftUI `ImageRenderer` in a test) and uploads the images as an artifact, so the layout can be judged without a Mac at hand; the owner approves before it is called done.
+- [ ] App icon: an original design (no Canon or other brand marks), delivered as `Packaging/AppIcon.icns` (generated from a vector source by a script, all standard sizes), referenced from Info.plist, checked by the bundle verification step.
+- [x] Defect (reported 2026-11-24): closing the window left the process running with no way to reopen a window (the "New Window" command is removed). Fixed: the app quits when its last window closes (`AppDelegate`, tested).
+
+### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
 
 ## Track P - Physical validation (optional, owner-scheduled)
