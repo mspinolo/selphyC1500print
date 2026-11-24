@@ -57,7 +57,8 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 ### M2 - Pipeline hardening
 - [x] 16-bit internal processing in the core (single final rounding); lossless PNG output as a precaution.
 - [ ] Measure the real JPEG penalty (encode the corrected chart as JPEG at several qualities and compare in DeltaE2000) before deciding whether JPEG output should return as an option. Note: an earlier suspicion that JPEG caused 5-11 DeltaE errors was wrong; the cause was a test bug (CoreGraphics bottom-left origin), fixed.
-- [ ] 16-bit decode of the source (JPEG sources are 8-bit; matters for future TIFF/HEIC input); correct output resolution metadata.
+- [x] 16-bit decode of the source (except EXIF-rotated images, which go through the 8-bit thumbnail API: open); alpha composited on white; input JPEG/JPEG XL/PNG/TIFF; output PNG (default) or JPEG (quality 0.98).
+- [ ] 16-bit decode for EXIF-rotated images; correct output resolution metadata.
 - [ ] Source handling: embedded Adobe RGB / Display P3 / untagged (explicit sRGB assumption surfaced in UI), grayscale and CMYK (convert or reject clearly), EXIF orientation 1-8, alpha, large images, memory bounds.
 - [ ] Tests for every case in the validation matrix, using small deterministic fixtures; fix the 3-byte packing loops (performance) or replace them.
 
@@ -66,7 +67,7 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 ### M3 - Real application
 - [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
 - [ ] Before/after preview; export to a user-chosen folder instead of a hidden temp folder; progress and cancellation; clear errors.
-- [ ] Decide input scope (JPEG only vs HEIC/TIFF) and UI language.
+- [x] Input scope: JPEG, JPEG XL, PNG, TIFF (HEIC not included). [ ] UI language.
 
 ### M4 - Print submission (no longer gated on physical prints)
 - [ ] Record the vendor's printer-setting instructions verbatim-in-substance in `Documentation/PRINT_SETTINGS.md` (owner to supply), and design the print route around them (sRGB pass-through, no second conversion, no printer-side enhancement).

@@ -1,6 +1,6 @@
 # SELPHY CP1500 Print
 
-A native macOS utility for experimental pre-correction of JPEGs for the Canon SELPHY CP1500. The colour conversion runs in a portable, tested C core built on LittleCMS (vendored, MIT).
+A native macOS utility for experimental pre-correction of images (JPEG, JPEG XL, PNG, TIFF) for the Canon SELPHY CP1500. The colour conversion runs in a portable, tested C core built on LittleCMS (vendored, MIT).
 
 > **Status: experimental.** The pre-correction is implemented, builds and is exercised by CI. The colour model is trusted on the vendor's (Farbenwerk's) documentation and has **not** been validated with physical prints. Direct printing remains disabled. Plan and evidence levels: `Documentation/ROADMAP.md`.
 
@@ -9,8 +9,8 @@ A native macOS utility for experimental pre-correction of JPEGs for the Canon SE
 - Native SwiftUI macOS interface.
 - Persistent printer name, rendering intent, BPC preference and security-scoped ICC bookmark.
 - Structural ICC validation.
-- LittleCMS transform (16-bit internally) from the source JPEG's embedded RGB profile (or assumed sRGB when absent) through PCS to the Farbenwerk printer profile's RGB device values. Black point compensation follows the ICC rules: always applied for perceptual/saturation with a v4 profile, optional for relative colorimetric.
-- Temporary lossless PNG copies (no lossy codec after the correction), with the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
+- LittleCMS transform (16-bit internally) from the source image's embedded RGB profile (or assumed sRGB when absent) through PCS to the Farbenwerk printer profile's RGB device values. Black point compensation follows the ICC rules: always applied for perceptual/saturation with a v4 profile, optional for relative colorimetric.
+- Temporary copies in PNG (default, lossless: no lossy codec after the correction) or, optionally, JPEG (quality 0.98, smaller files). Sources are decoded at 16 bits per component; transparent areas are composited on white. Output is the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
 - EXIF orientation is applied when decoding; source files are read-only.
 - Temporary sessions are stored under the system temporary directory and abandoned sessions older than 24 hours are removed on the next conversion.
 
@@ -51,6 +51,6 @@ The plan, milestones and evidence levels are maintained in [`Documentation/ROADM
 
 ## Privacy
 
-- Source JPEGs are never modified.
+- Source images are never modified.
 - The app does not embed the ICC profile: the user selects it at runtime. A copy is kept at the repository root for tests.
-- Temporary PNGs are stored outside the photo library.
+- Temporary copies are stored outside the photo library.
