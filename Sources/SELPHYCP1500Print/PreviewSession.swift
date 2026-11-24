@@ -217,7 +217,8 @@ final class PreviewSession: @unchecked Sendable {
             stats: correction.analysis.stats,
             heatMap: correction.heatMap,
             sourceDescription: correction.sourceDescription,
-            displayName: transform.displayName
+            displayName: transform.displayName,
+            maps: correction.analysis.maps
         )
     }
 

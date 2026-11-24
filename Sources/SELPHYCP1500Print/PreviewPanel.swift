@@ -2,16 +2,16 @@ import SwiftUI
 import AppKit
 
 /// Soft-proof preview of the selected photo: original, expected print without correction and
-/// expected print with correction, plus a before/after slider. A model-based simulation from
-/// the printer profile, not a print proof.
+/// expected print with correction, a before/after slider and analysis overlays (deviation map
+/// with an adjustable scale, shadows the printer cannot reproduce, colours outside its gamut,
+/// Postcard layout). A model-based simulation from the printer profile, not a print proof.
 struct PreviewPanel: View {
     @EnvironmentObject private var settings: AppSettings
-    /// The photo chosen in the sidebar.
     let photo: URL?
     let hasPhotos: Bool
 
     enum Mode: String, CaseIterable, Identifiable {
-        case original, uncorrected, corrected, compare, heatMap
+        case original, uncorrected, corrected, compare, heatMap, shadows, gamut, layout
 
         var id: String { rawValue }
 
@@ -22,17 +22,52 @@ struct PreviewPanel: View {
             case .corrected: tr("With correction")
             case .compare: tr("Compare")
             case .heatMap: tr("ΔE map")
+            case .shadows: tr("Dark zones")
+            case .gamut: tr("Out of gamut")
+            case .layout: tr("Postcard layout")
+            }
+        }
+    }
+
+    enum Zoom: String, CaseIterable, Identifiable {
+        case fit, x100, x200, x400
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .fit: tr("Fit")
+            case .x100: "100%"
+            case .x200: "200%"
+            case .x400: "400%"
+            }
+        }
+
+        /// Points per preview pixel; nil = fit the area.
+        var factor: Double? {
+            switch self {
+            case .fit: nil
+            case .x100: 1
+            case .x200: 2
+            case .x400: 4
             }
         }
     }
 
     @State private var mode: Mode = .compare
+    @State private var zoom: Zoom = .fit
     @State private var simulatePaperWhite = false
     @State private var previewBlackPointCompensation = false
     @State private var preview: PreviewService.Preview?
     @State private var errorMessage: String?
     @State private var isRendering = false
     @State private var sliderFraction = 0.5
+    @State private var deltaEScale = DeltaEScale.standard
+    @State private var shadowMargin = 0.0
+    @State private var gamutLoss = 8.0
+    @State private var overlay: CGImage?
+    @State private var generation = 0
+    @State private var reading: PixelReading?
     /// Keeps the decoded/corrected buffers and renderings between re-renders.
     @State private var session = PreviewSession()
 
@@ -44,6 +79,15 @@ struct PreviewPanel: View {
         var paper: Bool
         var previewBPC: Bool
         var profile: Data?
+    }
+
+    /// Everything that changes the overlay image.
+    private struct OverlayKey: Equatable {
+        var mode: Mode
+        var scale: DeltaEScale
+        var margin: Double
+        var gamutLoss: Double
+        var generation: Int
     }
 
     private var currentPhoto: URL? { photo }
@@ -59,6 +103,10 @@ struct PreviewPanel: View {
         )
     }
 
+    private var overlayKey: OverlayKey {
+        OverlayKey(mode: mode, scale: deltaEScale, margin: shadowMargin, gamutLoss: gamutLoss, generation: generation)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !hasPhotos {
@@ -68,6 +116,7 @@ struct PreviewPanel: View {
             } else {
                 controls
                 previewArea
+                readout
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         notes
@@ -81,6 +130,8 @@ struct PreviewPanel: View {
             }
         }
         .task(id: renderKey) { await render() }
+        .onChange(of: overlayKey) { recomputeOverlay() }
+        .onChange(of: photo) { reading = nil }
     }
 
     private func placeholder(_ text: String, symbol: String) -> some View {
@@ -94,34 +145,140 @@ struct PreviewPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: Controls
+
     private var controls: some View {
-        HStack(spacing: 12) {
-            Picker(tr("View"), selection: $mode) {
-                ForEach(Mode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Picker(tr("View"), selection: $mode) {
+                    ForEach(Mode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
                 }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 280)
+                Picker(tr("Zoom"), selection: $zoom) {
+                    ForEach(Zoom.allCases) { zoom in
+                        Text(zoom.title).tag(zoom)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 240)
+                .disabled(mode == .layout)
+                .help(tr("Zoom of the preview image (100% = one preview pixel per point). Scroll to move around."))
+                Spacer()
+                Menu {
+                    Toggle(tr("Simulate paper white"), isOn: $simulatePaperWhite)
+                    Toggle(tr("Monitor black instead of printed black"), isOn: $previewBlackPointCompensation)
+                        .disabled(simulatePaperWhite)
+                } label: {
+                    Label(tr("Preview options"), systemImage: "slider.horizontal.3")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 560)
-            Spacer()
-            Menu {
-                Toggle(tr("Simulate paper white"), isOn: $simulatePaperWhite)
-                Toggle(tr("Monitor black instead of printed black"), isOn: $previewBlackPointCompensation)
-                    .disabled(simulatePaperWhite)
-            } label: {
-                Label(tr("Preview options"), systemImage: "slider.horizontal.3")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            modeControls
         }
     }
+
+    @ViewBuilder
+    private var modeControls: some View {
+        switch mode {
+        case .heatMap:
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    Text(tr("ΔE scale: from")).font(.caption)
+                    Slider(value: Binding(
+                        get: { Double(deltaEScale.low) },
+                        set: { deltaEScale.low = Float($0); deltaEScale = deltaEScale.clamped() }
+                    ), in: 0...20, step: 0.5)
+                    .frame(maxWidth: 180)
+                    Text(String(format: "%.1f", deltaEScale.low)).font(.caption.monospacedDigit())
+                    Text(tr("to")).font(.caption)
+                    Slider(value: Binding(
+                        get: { Double(deltaEScale.high) },
+                        set: { deltaEScale.high = Float($0); deltaEScale = deltaEScale.clamped() }
+                    ), in: 1...30, step: 0.5)
+                    .frame(maxWidth: 180)
+                    Text(String(format: "%.1f", deltaEScale.high)).font(.caption.monospacedDigit())
+                    Button(tr("Reset")) { deltaEScale = .standard }
+                        .controlSize(.small)
+                        .disabled(deltaEScale == .standard)
+                }
+                HStack(spacing: 8) {
+                    Text(String(format: "%.1f", deltaEScale.low)).font(.caption2.monospacedDigit())
+                    HeatLegend(scale: deltaEScale)
+                        .frame(width: 200, height: 10)
+                    Text(String(format: "%.1f", deltaEScale.high)).font(.caption2.monospacedDigit())
+                    Text(tr("ΔE00: transparent below the first value, red from the second."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .shadows:
+            if let preview {
+                let darkest = preview.stats.darkestToneL
+                let share = Overlays.shadowShare(preview.maps, darkestL: darkest, margin: shadowMargin)
+                HStack(spacing: 10) {
+                    Text(tr("Margin above the darkest tone")).font(.caption)
+                    Slider(value: $shadowMargin, in: 0...15, step: 0.5)
+                        .frame(maxWidth: 180)
+                    Text(String(format: "%.1f L*", shadowMargin)).font(.caption.monospacedDigit())
+                    Text(trf("Highlighted: darker than L* %.0f, the darkest tone the printer reproduces: %.0f%% of pixels.", darkest + shadowMargin, share * 100))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .gamut:
+            if let preview {
+                let share = Overlays.gamutShare(preview.maps, minimumLoss: Float(gamutLoss))
+                HStack(spacing: 10) {
+                    Text(tr("Chroma lost above")).font(.caption)
+                    Slider(value: $gamutLoss, in: 2...30, step: 1)
+                        .frame(maxWidth: 180)
+                    Text(String(format: "C* %.0f", gamutLoss)).font(.caption.monospacedDigit())
+                    Text(trf("Highlighted: colours the print makes duller by more than this: %.0f%% of pixels.", share * 100))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .layout:
+            HStack(spacing: 10) {
+                Picker(tr("Image placement"), selection: $settings.printFit) {
+                    ForEach(PrintFit.allCases) { fit in
+                        Text(fit.title).tag(fit)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 380)
+                Text(tr("Shows the sheet as the print dialog would place the image; the dimmed part is cut off."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    // MARK: Image area
 
     @ViewBuilder
     private var previewArea: some View {
         ZStack {
             if let preview {
-                imageArea(for: preview)
+                if mode == .layout {
+                    PostcardLayoutView(image: preview.corrected, fit: settings.printFit)
+                } else {
+                    ZoomContainer(
+                        imageSize: CGSize(width: preview.original.width, height: preview.original.height),
+                        factor: zoom.factor,
+                        onHover: { point in updateReading(point, preview: preview) }
+                    ) {
+                        imageContent(for: preview)
+                    }
+                }
             } else if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
@@ -137,18 +294,20 @@ struct PreviewPanel: View {
     }
 
     @ViewBuilder
-    private func imageArea(for preview: PreviewService.Preview) -> some View {
+    private func imageContent(for preview: PreviewService.Preview) -> some View {
         switch mode {
         case .original:
             ImageFit(image: preview.original)
         case .uncorrected:
             ImageFit(image: preview.uncorrected)
-        case .corrected:
+        case .corrected, .layout:
             ImageFit(image: preview.corrected)
-        case .heatMap:
+        case .heatMap, .shadows, .gamut:
             ZStack {
-                ImageFit(image: preview.original).opacity(0.45)
-                ImageFit(image: preview.heatMap)
+                ImageFit(image: preview.original).opacity(mode == .heatMap ? 0.45 : 0.6)
+                if let overlay {
+                    ImageFit(image: overlay)
+                }
             }
         case .compare:
             ComparisonSlider(
@@ -159,13 +318,31 @@ struct PreviewPanel: View {
         }
     }
 
+    private func updateReading(_ point: CGPoint?, preview: PreviewService.Preview) {
+        let next = point.flatMap { PreviewGeometry.reading(maps: preview.maps, u: Double($0.x), v: Double($0.y)) }
+        if next != reading { reading = next }
+    }
+
+    /// The colour under the pointer: what the photo should look like and what the model predicts in print.
+    private var readout: some View {
+        Group {
+            if let reading {
+                Text(trf("Original L* %.1f a* %.1f b* %.1f  →  print L* %.1f a* %.1f b* %.1f  ·  ΔE00 %.1f",
+                         reading.intended.l, reading.intended.a, reading.intended.b,
+                         reading.predicted.l, reading.predicted.a, reading.predicted.b, reading.deltaE))
+            } else {
+                Text(tr("Move the pointer over the photo to read the colour of a point."))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
     private var notes: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if mode == .heatMap {
-                Text(tr("Transparent: the predicted print is close to the original (ΔE00 below 1). Yellow: about 3. Red: 6 or more."))
-                    .font(.caption)
-            }
             if mode == .compare {
                 Text(tr("Left: predicted print without correction. Right: with correction. Drag to move the divider."))
                     .font(.caption)
@@ -184,6 +361,20 @@ struct PreviewPanel: View {
             Text(tr("Simulation computed from the printer profile: it is not a proof and has not been validated with physical prints."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func recomputeOverlay() {
+        guard let preview else { overlay = nil; return }
+        switch mode {
+        case .heatMap:
+            overlay = Overlays.heatMap(preview.maps, scale: deltaEScale)
+        case .shadows:
+            overlay = Overlays.shadowMask(preview.maps, darkestL: preview.stats.darkestToneL, margin: shadowMargin)
+        case .gamut:
+            overlay = Overlays.gamutMask(preview.maps, minimumLoss: Float(gamutLoss))
+        default:
+            overlay = nil
         }
     }
 
@@ -213,12 +404,111 @@ struct PreviewPanel: View {
             }.value
             if Task.isCancelled { return }
             preview = result
+            generation += 1
             errorMessage = nil
         } catch {
             if Task.isCancelled { return }
             preview = nil
+            overlay = nil
             errorMessage = trf("Preview unavailable: %@", error.localizedDescription)
         }
+    }
+}
+
+/// Scrollable, zoomable area. The content has the image's aspect ratio; `onHover` receives the
+/// pointer position as fractions (0...1) of the image, or nil when it leaves.
+private struct ZoomContainer<Content: View>: View {
+    let imageSize: CGSize
+    let factor: Double?
+    let onHover: (CGPoint?) -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        GeometryReader { geometry in
+            let side = PreviewGeometry.contentSize(imageSize: imageSize, available: geometry.size, factor: factor)
+            ScrollView([.horizontal, .vertical]) {
+                content()
+                    .frame(width: side.width, height: side.height)
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let point):
+                            onHover(CGPoint(x: point.x / max(1, side.width), y: point.y / max(1, side.height)))
+                        case .ended:
+                            onHover(nil)
+                        }
+                    }
+                    .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+            }
+        }
+    }
+}
+
+/// The Postcard sheet with the image placed as the print dialog would place it.
+private struct PostcardLayoutView: View {
+    let image: CGImage
+    let fit: PrintFit
+
+    var body: some View {
+        GeometryReader { geometry in
+            let landscape = image.width > image.height
+            let aspect = landscape ? 148.0 / 100.0 : 100.0 / 148.0    // sheet width / height
+            let available = CGSize(width: max(1, geometry.size.width - 24), height: max(1, geometry.size.height - 40))
+            let sheetWidth = min(available.width, available.height * aspect)
+            let sheet = CGRect(
+                x: (geometry.size.width - sheetWidth) / 2,
+                y: (geometry.size.height - 16 - sheetWidth / aspect) / 2,
+                width: sheetWidth, height: sheetWidth / aspect
+            )
+            let rect = PrintLayout.imageRect(
+                imageSize: CGSize(width: image.width, height: image.height), in: sheet, fit: fit)
+            ZStack(alignment: .topLeading) {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .opacity(0.3)
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: sheet.width, height: sheet.height)
+                    .position(x: sheet.midX, y: sheet.midY)
+                ZStack(alignment: .topLeading) {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX - sheet.minX, y: rect.midY - sheet.minY)
+                }
+                .frame(width: sheet.width, height: sheet.height)
+                .clipped()
+                .position(x: sheet.midX, y: sheet.midY)
+                Rectangle()
+                    .stroke(Color.secondary, lineWidth: 1)
+                    .frame(width: sheet.width, height: sheet.height)
+                    .position(x: sheet.midX, y: sheet.midY)
+                Text(tr("Postcard 100 × 148 mm"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height - 8)
+            }
+        }
+    }
+}
+
+/// Colour bar of the deviation map for the chosen scale.
+private struct HeatLegend: View {
+    let scale: DeltaEScale
+
+    var body: some View {
+        let stops = (0...10).map { step -> Gradient.Stop in
+            let t = Float(step) / 10
+            let (green, alpha) = Overlays.ramp(t)
+            return Gradient.Stop(
+                color: Color(red: 1, green: Double(green) / 255, blue: 0).opacity(Double(alpha) / 255),
+                location: Double(t))
+        }
+        return RoundedRectangle(cornerRadius: 3)
+            .fill(LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.secondary.opacity(0.5), lineWidth: 0.5))
+            .accessibilityLabel(trf("Colour scale from ΔE00 %.1f to %.1f", Double(scale.low), Double(scale.high)))
     }
 }
 

@@ -32,6 +32,8 @@ enum PreviewService {
         /// Where the colours came from, for the details panel.
         let sourceDescription: String
         let displayName: String
+        /// Per-pixel model results at the analysis resolution (overlays, inspector, statistics).
+        let maps: PixelMaps
     }
 
     /// Per-photo checks from the core (`selphy_analyze_photo`), measured against the photo read
@@ -263,6 +265,35 @@ enum PreviewService {
         let deltaEMap: [Float]
         let width: Int
         let height: Int
+        let maps: PixelMaps
+    }
+
+    /// Intended and predicted Lab per pixel (same inputs as `selphy_analyze_photo`).
+    static func pixelMaps(
+        printerICC: Data, srgb: [UInt8], device: [UInt8], deltaE: [Float], width: Int, height: Int
+    ) throws -> PixelMaps {
+        let count = width * height
+        let srgb16 = srgb.map { UInt16($0) * 257 }
+        let device16 = device.map { UInt16($0) * 257 }
+        var intended = [Double](repeating: 0, count: count * 3)
+        var predicted = [Double](repeating: 0, count: count * 3)
+        let sourceStatus = selphy_source_to_lab(nil, 0, srgb16, &intended, count)
+        guard sourceStatus == SELPHY_OK else {
+            throw ColorCorrectionService.CorrectionError.transformCreation(String(cString: selphy_status_message(sourceStatus)))
+        }
+        let printerStatus: selphy_status = printerICC.withUnsafeBytes { bytes in
+            selphy_printer_predict_lab(
+                bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count,
+                SELPHY_INTENT_RELATIVE_COLORIMETRIC, device16, &predicted, count
+            )
+        }
+        guard printerStatus == SELPHY_OK else {
+            throw ColorCorrectionService.CorrectionError.transformCreation(String(cString: selphy_status_message(printerStatus)))
+        }
+        return PixelMaps(
+            width: width, height: height, deltaE: deltaE,
+            intendedLab: intended.map { Float($0) }, predictedLab: predicted.map { Float($0) }
+        )
     }
 
     /// Runs the core checks on a reduced copy (see `analysisDimension`).
@@ -292,7 +323,11 @@ enum PreviewService {
                 neutralShare: raw.neutral_share,
                 neutralP95Chroma: raw.neutral_p95_chroma >= 0 ? raw.neutral_p95_chroma : nil
             ),
-            deltaEMap: map, width: source.width, height: source.height
+            deltaEMap: map, width: source.width, height: source.height,
+            maps: try pixelMaps(
+                printerICC: printerICC, srgb: source.rgb, device: device.rgb,
+                deltaE: map, width: source.width, height: source.height
+            )
         )
     }
 
@@ -310,12 +345,7 @@ enum PreviewService {
     /// Overlay colour for a dE00 value: transparent below 1, yellow around 3, red from 6.
     /// Returns premultiplied RGBA.
     static func heatColor(deltaE: Float) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
-        guard deltaE.isFinite, deltaE > 1 else { return (0, 0, 0, 0) }
-        let t = min(1, (deltaE - 1) / 5)
-        let alpha = 90 + 130 * t
-        let green = 255 * (1 - t)
-        let scale = alpha / 255
-        return (UInt8((255 * scale).rounded()), UInt8((green * scale).rounded()), 0, UInt8(alpha.rounded()))
+        Overlays.heatColor(deltaE: deltaE, scale: .standard)
     }
 
     static func makeHeatMap(deltaE: [Float], width: Int, height: Int) throws -> CGImage {
