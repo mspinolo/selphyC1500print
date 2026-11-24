@@ -64,18 +64,20 @@ enum ColorCorrectionService {
                 exact: exact ? 1 : 0
             )
             var created: OpaquePointer?
-            let source = sourceICC ?? Data()
-            let status: selphy_status = source.withUnsafeBytes { sourceBytes in
-                printerICC.withUnsafeBytes { printerBytes in
-                    selphy_transform_create(
-                        sourceBytes.bindMemory(to: UInt8.self).baseAddress,
-                        sourceBytes.count,
-                        printerBytes.bindMemory(to: UInt8.self).baseAddress,
-                        printerBytes.count,
-                        &options,
-                        &created
-                    )
+            let status: selphy_status = printerICC.withUnsafeBytes { printerBytes in
+                let printerBase = printerBytes.bindMemory(to: UInt8.self).baseAddress
+                // An empty Data still yields a non-nil pointer in Swift; the core expects
+                // NULL (with size 0) for "no embedded profile, assume sRGB".
+                if let sourceICC, !sourceICC.isEmpty {
+                    return sourceICC.withUnsafeBytes { sourceBytes in
+                        selphy_transform_create(
+                            sourceBytes.bindMemory(to: UInt8.self).baseAddress, sourceBytes.count,
+                            printerBase, printerBytes.count,
+                            &options, &created
+                        )
+                    }
                 }
+                return selphy_transform_create(nil, 0, printerBase, printerBytes.count, &options, &created)
             }
             guard status == SELPHY_OK, let created else {
                 let message = String(cString: selphy_status_message(status))

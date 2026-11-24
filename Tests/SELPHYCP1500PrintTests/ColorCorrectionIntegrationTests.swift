@@ -58,7 +58,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             printerProfileURL: invalidProfile,
             intent: .perceptual,
             blackPointCompensation: false
-        ))
+        )) { error in
+            guard case ColorCorrectionService.CorrectionError.profileLoad = error else {
+                return XCTFail("Expected profileLoad, got \(error)")
+            }
+        }
         XCTAssertEqual(try Data(contentsOf: sourceURL), originalBytes)
     }
 
@@ -84,7 +88,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             printerProfileURL: profileURL,
             intent: .perceptual,
             blackPointCompensation: false
-        ))
+        )) { error in
+            guard case ColorCorrectionService.CorrectionError.unreadableImage = error else {
+                return XCTFail("Expected unreadableImage, got \(error)")
+            }
+        }
 
         let after = Set(try FileManager.default.contentsOfDirectory(atPath: root.path))
         XCTAssertEqual(after, before, "A failed batch must remove its partially generated session")
@@ -127,7 +135,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             printerProfileURL: profileURL,
             intent: .perceptual,
             blackPointCompensation: false
-        ))
+        )) { error in
+            guard case ColorCorrectionService.CorrectionError.unsupportedColorSpace = error else {
+                return XCTFail("Expected unsupportedColorSpace, got \(error)")
+            }
+        }
         XCTAssertEqual(try Data(contentsOf: sourceURL), original)
     }
 
