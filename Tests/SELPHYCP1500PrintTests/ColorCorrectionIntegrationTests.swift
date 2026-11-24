@@ -748,7 +748,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         let grayFile = try makeGrayImageFile(level: 0.5)
         defer { try? FileManager.default.removeItem(at: grayFile) }
         let converted = try makePreview(of: grayFile)
-        XCTAssertTrue(converted.sourceDescription.contains("convertito in sRGB"), converted.sourceDescription)
+        XCTAssertTrue(converted.sourceDescription.contains("converted to sRGB"), converted.sourceDescription)
         print("Preview check descriptions: \(grey.sourceDescription) | \(converted.sourceDescription)")
     }
 
