@@ -80,14 +80,22 @@ Order of work: M3.1 preview first (it is also the tool to judge the correction w
 - [ ] Owner check on a real Mac (not verifiable in CI): the panel layout and the slider, the display profile of a wide-gamut screen (P3), responsiveness on a large photo.
 - [ ] Known limits: the preview normalises the original to sRGB (a wide-gamut source is shown clipped to sRGB in the "Original" view); gamut-clipping count is best effort for display profiles that clip in float.
 
-**M3.1b Colour details and per-photo checks (before the `.app` bundle)**
-Measured on the real profile, corrected neutral ramp (model, relative colorimetric, BPC off): neutral from source level 50/255 (L* ~21) upwards, residual chroma C* <= 0.9 and dE00 < 1; levels 0-30 all print as the printer black (L* 17.8) with a slight blue cast (a* 1.1, b* -4.0, C* ~4): shadow detail collapses. Perceptual keeps shadow separation but lifts tones by 3-7 L* and leaves C* up to 3.7. Relative + BPC not yet measured.
-- [ ] Core: per-image statistics from a preview-sized buffer: share of pixels not reproducible (dE00 > 3 between intended and predicted), share of pixels in collapsing shadows, mean and 95th percentile dE00, maximum residual chroma for near-neutral images (black-and-white detection). Linux tests with known inputs (neutral ramp, saturated primaries, mid grey) and mutation checks.
-- [ ] Core: per-pixel dE00 map (original vs predicted print) for a heat-map overlay.
-- [ ] Measure and record the shadow behaviour of relative + BPC versus perceptual (ramp, same method), and decide what the UI should recommend for black-and-white photos.
-- [ ] Swift/UI: collapsible "Colour details" panel (closed by default): colour space and meaning of the numbers of each of the three views, display profile in use, the per-photo checks above, black-and-white note; heat-map toggle.
+**M3.1b Colour details and per-photo checks - implemented, to be checked on the owner's Mac**
+Measured on the real profile, corrected neutral ramp (model, predicted print vs intended appearance):
+
+| Rendering | Shadows | Neutrals |
+|---|---|---|
+| relative, BPC off | source levels 0-45 (of 255) all print as the darkest tone, L* 17.8, slight blue cast (C* ~4); separation is lost | from level 50 (L* ~21) upwards C* <= 0.9, dE00 < 1 |
+| relative + BPC | levels 0-20 still collapse; separation from level ~30; dE00 3.6-6 in the shadows | C* <= 0.3 from level 40 |
+| perceptual | no collapse, smooth compression; tones lifted by 3-7 L* | C* up to 3.7 in the shadows, ~1-1.6 in the mid tones |
+
+Correction of an earlier statement: the darkest the printer can print is L* 13.2 (device RGB 0,0,0), but with a strong blue-cyan tint (about 17/36/51 on screen); the correction does not use it and aims at about L* 17.8, nearly neutral (device 31/19/0). That is the "darkest tone" used by the checks. LittleCMS's black point estimate (13.2) matches the device black, it is not an error.
+- [x] Core `selphy_analyze_photo` (dE00 mean/p95/max, share not reproducible > 3, darkest tone, share below it, neutral share and residual chroma, per-pixel dE map); Linux tests (independent recomputation of the dE map, shadow share and darkest tone; uncorrected vs corrected neutral tint); mutation-checked (dE threshold, shadow threshold, chroma taken from the wrong image).
+- [x] Swift: stats, translucent dE heat map ("Mappa dE" view), collapsible "Dettagli colore" panel (meaning of the three views, source profile and interpretation, display profile, checks, black-and-white note). CI: grey/red/dark-grey stats, heat map, descriptions.
+- [x] Measured relative + BPC vs perceptual vs relative on shadows (table above).
+- [ ] Decide what the UI recommends for black-and-white photos (needs a print to judge shadow detail against neutrality; for now the panel only reports residual tint and the share of shadows below the darkest tone).
+- [ ] Preview speed: 3000x2000 source took 6.0 s on the CI runner (decode, correction, analysis, two renderings). Every toggle currently recomputes everything; cache the decoded source and the corrected buffers per (photo, intent, BPC) so that display options only re-render. Check on the owner's Mac first.
 - [ ] Later, lower priority: a*-b* plot of the printer gamut versus sRGB with the photo's colours.
-- [ ] Wording: all of it is a model estimate, to be confirmed with a print.
 
 **M3.2 Application shell**
 - [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
