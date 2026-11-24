@@ -190,6 +190,10 @@ enum ColorCorrectionService {
         let embeddedICC: Data?
         let interpretation: SourceInterpretation
         let dpi: (width: Double, height: Double)?
+        /// Profile description reported by ImageIO (e.g. "sRGB IEC61966-2.1"), if any.
+        let profileName: String?
+        /// Colour model of the file as decoded by ImageIO (RGB, Gray, CMYK...).
+        let colorModel: String?
     }
 
     /// Decodes the first image of a file to 16-bit RGBX.
@@ -275,7 +279,9 @@ enum ColorCorrectionService {
         return LoadedSource(
             pixels: pixels, width: width, height: height, orientation: orientation,
             embeddedICC: embeddedICC, interpretation: interpretation,
-            dpi: resolution(from: properties)
+            dpi: resolution(from: properties),
+            profileName: properties?[kCGImagePropertyProfileName] as? String,
+            colorModel: properties?[kCGImagePropertyColorModel] as? String
         )
     }
 
@@ -340,7 +346,7 @@ enum ColorCorrectionService {
         let orientation = loaded.orientation
         let sourceDPI = loaded.dpi
         let interpretation = loaded.interpretation
-        loaded = LoadedSource(pixels: Data(), width: 0, height: 0, orientation: 1, embeddedICC: nil, interpretation: interpretation, dpi: nil)
+        loaded = LoadedSource(pixels: Data(), width: 0, height: 0, orientation: 1, embeddedICC: nil, interpretation: interpretation, dpi: nil, profileName: nil, colorModel: nil)
 
         // Deliberately re-tag the corrected numeric RGB values as sRGB. The
         // SELPHY has a fixed internal color pipeline; the profile is used to

@@ -13,6 +13,7 @@ struct PreviewPanel: View {
         case uncorrected = "Senza correzione"
         case corrected = "Con correzione"
         case compare = "Confronto"
+        case heatMap = "Mappa ΔE"
 
         var id: String { rawValue }
     }
@@ -66,6 +67,9 @@ struct PreviewPanel: View {
                     controls
                     previewArea
                     notes
+                    if let preview {
+                        ColorDetails(preview: preview)
+                    }
                 }
             }
             .padding(.vertical, 4)
@@ -95,7 +99,7 @@ struct PreviewPanel: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 440)
+                .frame(maxWidth: 560)
             }
             HStack(spacing: 16) {
                 Toggle("Simula il bianco della carta", isOn: $simulatePaperWhite)
@@ -134,6 +138,11 @@ struct PreviewPanel: View {
             ImageFit(image: preview.uncorrected)
         case .corrected:
             ImageFit(image: preview.corrected)
+        case .heatMap:
+            ZStack {
+                ImageFit(image: preview.original).opacity(0.45)
+                ImageFit(image: preview.heatMap)
+            }
         case .compare:
             ComparisonSlider(
                 before: preview.uncorrected,
@@ -146,6 +155,10 @@ struct PreviewPanel: View {
     @ViewBuilder
     private var notes: some View {
         VStack(alignment: .leading, spacing: 3) {
+            if mode == .heatMap {
+                Text("Trasparente: la stampa prevista è vicina all'originale (ΔE00 sotto 1). Giallo: circa 3. Rosso: 6 o più.")
+                    .font(.caption)
+            }
             if mode == .compare {
                 Text("A sinistra: stampa prevista senza correzione. A destra: con correzione. Trascina per spostare il divisore.")
                     .font(.caption)
@@ -246,5 +259,54 @@ private struct ComparisonSlider: View {
             )
         }
         .aspectRatio(aspect, contentMode: .fit)
+    }
+}
+
+
+/// Collapsible explanation of the three views and the per-photo checks. Everything here is a
+/// model estimate from the printer profile, to be confirmed with a print.
+private struct ColorDetails: View {
+    let preview: PreviewService.Preview
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup("Dettagli colore", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    row("Originale", "numeri sRGB della foto (\(preview.sourceDescription)).")
+                    row("Senza correzione", "gli stessi numeri inviati alla stampante, mostrati col modello del profilo e convertiti nel profilo del monitor (\(preview.displayName)).")
+                    row("Con correzione", "i numeri corretti dal profilo, mostrati allo stesso modo. Il file esportato li etichetta sRGB.")
+                }
+                Divider()
+                checks
+                Text("Stime dal modello del profilo, misurate rispetto alla foto letta come sRGB: da confermare con una stampa.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 4)
+        }
+        .font(.callout)
+    }
+
+    private func row(_ title: String, _ text: String) -> some View {
+        (Text(title + ": ").bold() + Text(text)).font(.caption)
+    }
+
+    @ViewBuilder
+    private var checks: some View {
+        let stats = preview.stats
+        VStack(alignment: .leading, spacing: 3) {
+            Text(String(format: "Scostamento previsto dall'originale: medio %.1f, 95° percentile %.1f (ΔE00).", stats.meanDeltaE, stats.p95DeltaE))
+            Text(String(format: "Colori non riproducibili (ΔE00 sopra 3): %.0f%% dei pixel.", stats.shareNotReproducible * 100))
+            Text(String(format: "Ombre più scure del tono più scuro riprodotto (L* %.0f): %.0f%% dei pixel — vengono unite o compresse.", stats.darkestToneL, stats.shareBelowDarkestTone * 100))
+            if stats.isBlackAndWhite {
+                if let chroma = stats.neutralP95Chroma {
+                    Text(String(format: "Foto in bianco e nero: tinta residua prevista nei toni riproducibili C* %.1f (0 = neutro).", chroma))
+                } else {
+                    Text("Foto in bianco e nero: nessun tono neutro riproducibile da valutare.")
+                }
+            }
+        }
+        .font(.caption)
     }
 }

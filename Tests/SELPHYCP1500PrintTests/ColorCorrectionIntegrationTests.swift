@@ -681,6 +681,99 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertEqual(try makePreview(of: url).outOfGamutFraction, 0)
     }
 
+    // MARK: - Colour details (per-photo checks)
+
+    private func solidPreview(red: CGFloat, green: CGFloat, blue: CGFloat) throws -> PreviewService.Preview {
+        let url = try makeSolidImageFile(
+            type: .png, colorSpace: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+            red: red, green: green, blue: blue
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try makePreview(of: url)
+    }
+
+    func testPhotoStatsForKnownImages() throws {
+        // Mid grey: reproduced, neutral, black and white.
+        let grey = try solidPreview(red: 0.5, green: 0.5, blue: 0.5).stats
+        print("Preview check stats grey: mean=\(grey.meanDeltaE) neutral=\(grey.neutralShare) chroma=\(String(describing: grey.neutralP95Chroma)) darkest=\(grey.darkestToneL)")
+        XCTAssertLessThan(grey.meanDeltaE, 1.0)
+        XCTAssertEqual(grey.shareNotReproducible, 0)
+        XCTAssertEqual(grey.shareBelowDarkestTone, 0)
+        XCTAssertEqual(grey.neutralShare, 1)
+        XCTAssertTrue(grey.isBlackAndWhite)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(grey.neutralP95Chroma), 1.5)
+        XCTAssertEqual(grey.darkestToneL, 17.8, accuracy: 1.0)
+
+        // Pure red: outside the printer gamut, colourful.
+        let red = try solidPreview(red: 1, green: 0, blue: 0).stats
+        XCTAssertEqual(red.shareNotReproducible, 1)
+        XCTAssertEqual(red.neutralShare, 0)
+        XCTAssertNil(red.neutralP95Chroma)
+        XCTAssertFalse(red.isBlackAndWhite)
+        XCTAssertGreaterThan(red.meanDeltaE, 5)
+
+        // Very dark grey: below the darkest tone the print reproduces.
+        let dark = try solidPreview(red: 0.02, green: 0.02, blue: 0.02).stats
+        XCTAssertEqual(dark.shareBelowDarkestTone, 1)
+        XCTAssertGreaterThan(dark.shareNotReproducible, 0.99)
+    }
+
+    func testHeatMapAndColourDescriptions() throws {
+        let grey = try solidPreview(red: 0.5, green: 0.5, blue: 0.5)
+        let red = try solidPreview(red: 1, green: 0, blue: 0)
+        XCTAssertEqual(grey.heatMap.width, grey.corrected.width)
+        XCTAssertEqual(grey.heatMap.height, grey.corrected.height)
+        func centre(_ image: CGImage) throws -> [UInt8] {
+            let pixels = try rgbaPixels(of: image)   // composited on black: transparent stays 0
+            return rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels)
+        }
+        XCTAssertEqual(try centre(grey.heatMap), [0, 0, 0], "a reproduced colour has no overlay")
+        XCTAssertGreaterThan(Int(try centre(red.heatMap)[0]), 100, "a not reproducible colour is marked")
+
+        XCTAssertEqual(PreviewService.heatColor(deltaE: 0.5).a, 0)
+        let mid = PreviewService.heatColor(deltaE: 3)
+        XCTAssertTrue(mid.a > 0 && mid.r > 0 && mid.g > 0, "yellow-ish around dE 3")
+        let high = PreviewService.heatColor(deltaE: 8)
+        XCTAssertEqual(high.g, 0)
+        XCTAssertGreaterThanOrEqual(high.a, 200)
+        XCTAssertEqual(PreviewService.heatColor(deltaE: .nan).a, 0)
+
+        XCTAssertFalse(grey.sourceDescription.isEmpty)
+        XCTAssertFalse(grey.displayName.isEmpty)
+        let grayFile = try makeGrayImageFile(level: 0.5)
+        defer { try? FileManager.default.removeItem(at: grayFile) }
+        let converted = try makePreview(of: grayFile)
+        XCTAssertTrue(converted.sourceDescription.contains("convertito in sRGB"), converted.sourceDescription)
+        print("Preview check descriptions: \(grey.sourceDescription) | \(converted.sourceDescription)")
+    }
+
+    /// Timing probe for a photo-sized image (not a pass/fail performance claim).
+    func testPreviewTimingOnLargeImage() throws {
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 3000, height: 2000, bitsPerComponent: 8, bytesPerRow: 0,
+            space: srgb, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        let gradient = try XCTUnwrap(CGGradient(
+            colorsSpace: srgb,
+            colors: [CGColor(red: 0.1, green: 0.2, blue: 0.7, alpha: 1), CGColor(red: 0.9, green: 0.6, blue: 0.2, alpha: 1)] as CFArray,
+            locations: [0, 1]
+        ))
+        context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 3000, y: 2000), options: [])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-large-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let start = Date()
+        let preview = try makePreview(of: url)
+        let elapsed = Date().timeIntervalSince(start)
+        print("Preview check timing: 3000x2000 source -> \(preview.corrected.width)x\(preview.corrected.height) preview in \(String(format: "%.2f", elapsed)) s")
+        XCTAssertEqual(max(preview.corrected.width, preview.corrected.height), 1400)
+        XCTAssertLessThan(elapsed, 30)
+    }
+
     private func correctedPixels(of url: URL, profileURL: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {
         let result = try ColorCorrectionService.prepareCopies(
             from: [url], printerProfileURL: profileURL,

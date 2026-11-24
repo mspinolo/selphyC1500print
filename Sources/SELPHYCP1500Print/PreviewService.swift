@@ -24,6 +24,35 @@ enum PreviewService {
         let usedSRGBFallback: Bool
         /// Whether black point compensation was effectively applied in the correction.
         let effectiveBlackPointCompensation: Bool
+        /// Checks of the photo against the model (see `PhotoStats`).
+        let stats: PhotoStats
+        /// dE00 between the original and the predicted print, as a translucent overlay
+        /// (transparent where the deviation is small).
+        let heatMap: CGImage
+        /// Where the colours came from, for the details panel.
+        let sourceDescription: String
+        let displayName: String
+    }
+
+    /// Per-photo checks from the core (`selphy_analyze_photo`), measured against the photo read
+    /// as sRGB. Model estimates, not measurements of a print.
+    struct PhotoStats: Equatable {
+        var meanDeltaE: Double
+        var p95DeltaE: Double
+        var maxDeltaE: Double
+        /// Share (0...1) of pixels with dE00 above `selphy`'s threshold (3).
+        var shareNotReproducible: Double
+        /// Predicted lightness of the corrected source black: the darkest tone the print reproduces.
+        var darkestToneL: Double
+        /// Share of pixels darker than that tone (shadows merged or compressed).
+        var shareBelowDarkestTone: Double
+        /// Share of near-neutral pixels.
+        var neutralShare: Double
+        /// 95th percentile of the predicted chroma of reproducible neutral pixels; nil if none.
+        var neutralP95Chroma: Double?
+
+        /// A photo is treated as black and white when almost all pixels are neutral.
+        var isBlackAndWhite: Bool { neutralShare >= Double(SELPHY_NEUTRAL_IMAGE_SHARE) }
     }
 
     struct Options {
@@ -42,6 +71,7 @@ enum PreviewService {
     struct Display {
         let iccData: Data
         let colorSpace: CGColorSpace
+        var name: String = "profilo del monitor"
 
         /// The profile of the screen the app window is on, or nil if it cannot be determined.
         @MainActor
@@ -51,7 +81,7 @@ enum PreviewService {
                   let icc = space.copyICCData() as Data?, !icc.isEmpty else {
                 return nil
             }
-            return Display(iccData: icc, colorSpace: space)
+            return Display(iccData: icc, colorSpace: space, name: screen?.colorSpace?.localizedName ?? "profilo del monitor")
         }
     }
 
@@ -229,6 +259,13 @@ enum PreviewService {
         let corrected = previewTransform.render(rgbx: correctedDevice, width: width, height: height, countOutOfGamut: true)
         let uncorrected = previewTransform.render(rgbx: sRGBDevice, width: width, height: height, countOutOfGamut: false)
 
+        // 4. Checks and dE map, measured on the same reduced buffers.
+        let blackDevice = correctedBlack(transform: correctionTransform)
+        let (stats, deltaEMap) = try analyse(
+            printerICC: printerICC, srgbRGBX: sRGBDevice, deviceRGBX: correctedDevice,
+            pixelCount: width * height, correctedBlack: blackDevice
+        )
+
         let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
         return Preview(
             original: try ColorCorrectionService.makeImage(rgbx: sRGBDevice, width: width, height: height, colorSpace: sRGB),
@@ -236,7 +273,107 @@ enum PreviewService {
             corrected: try ColorCorrectionService.makeImage(rgbx: corrected.pixels, width: width, height: height, colorSpace: imageSpace),
             outOfGamutFraction: Double(corrected.outOfGamut) / Double(max(1, width * height)),
             usedSRGBFallback: usedFallback,
-            effectiveBlackPointCompensation: correctionTransform.effectiveBlackPointCompensation
+            effectiveBlackPointCompensation: correctionTransform.effectiveBlackPointCompensation,
+            stats: stats,
+            heatMap: try makeHeatMap(deltaE: deltaEMap, width: width, height: height),
+            sourceDescription: describe(loaded),
+            displayName: usedFallback || display == nil ? "sRGB" : display!.name
         )
+    }
+
+    /// What the correction sends to the printer for source black.
+    private static func correctedBlack(transform: ColorCorrectionService.ColorTransform) -> [UInt8] {
+        var input: [UInt16] = [0, 0, 0]
+        var output: [UInt16] = [0, 0, 0]
+        transform.apply16(&input, to: &output, pixelCount: 1)
+        return output.map { UInt8((UInt32($0) * 255 + 32767) / 65535) }
+    }
+
+    private static func packRGB(_ rgbx: Data) -> [UInt8] {
+        let count = rgbx.count / 4
+        var packed = [UInt8](repeating: 0, count: count * 3)
+        rgbx.withUnsafeBytes { raw in
+            let source = raw.bindMemory(to: UInt8.self)
+            for i in 0..<count {
+                packed[i * 3] = source[i * 4]
+                packed[i * 3 + 1] = source[i * 4 + 1]
+                packed[i * 3 + 2] = source[i * 4 + 2]
+            }
+        }
+        return packed
+    }
+
+    private static func analyse(
+        printerICC: Data, srgbRGBX: Data, deviceRGBX: Data, pixelCount: Int, correctedBlack: [UInt8]
+    ) throws -> (PhotoStats, [Float]) {
+        let source = packRGB(srgbRGBX)
+        let device = packRGB(deviceRGBX)
+        var map = [Float](repeating: 0, count: pixelCount)
+        var raw = selphy_photo_stats()
+        let status: selphy_status = printerICC.withUnsafeBytes { printerBytes in
+            selphy_analyze_photo(
+                printerBytes.bindMemory(to: UInt8.self).baseAddress, printerBytes.count,
+                source, device, pixelCount, correctedBlack, &map, &raw
+            )
+        }
+        guard status == SELPHY_OK else {
+            throw ColorCorrectionService.CorrectionError.transformCreation(String(cString: selphy_status_message(status)))
+        }
+        return (
+            PhotoStats(
+                meanDeltaE: raw.mean_de, p95DeltaE: raw.p95_de, maxDeltaE: raw.max_de,
+                shareNotReproducible: raw.share_not_reproducible,
+                darkestToneL: raw.darkest_tone_l, shareBelowDarkestTone: raw.share_below_darkest_tone,
+                neutralShare: raw.neutral_share,
+                neutralP95Chroma: raw.neutral_p95_chroma >= 0 ? raw.neutral_p95_chroma : nil
+            ),
+            map
+        )
+    }
+
+    private static func describe(_ loaded: ColorCorrectionService.LoadedSource) -> String {
+        switch loaded.interpretation {
+        case .embeddedProfile:
+            return "profilo incorporato \(loaded.profileName ?? "RGB")"
+        case .assumedSRGB:
+            return "RGB senza profilo utilizzabile, assunto sRGB"
+        case .convertedToSRGB:
+            return "\(loaded.colorModel ?? "non RGB"), convertito in sRGB"
+        }
+    }
+
+    /// Overlay colour for a dE00 value: transparent below 1, yellow around 3, red from 6.
+    /// Returns premultiplied RGBA.
+    static func heatColor(deltaE: Float) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8) {
+        guard deltaE.isFinite, deltaE > 1 else { return (0, 0, 0, 0) }
+        let t = min(1, (deltaE - 1) / 5)
+        let alpha = 90 + 130 * t
+        let green = 255 * (1 - t)
+        let scale = alpha / 255
+        return (UInt8((255 * scale).rounded()), UInt8((green * scale).rounded()), 0, UInt8(alpha.rounded()))
+    }
+
+    private static func makeHeatMap(deltaE: [Float], width: Int, height: Int) throws -> CGImage {
+        var pixels = Data(count: width * height * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            let target = raw.bindMemory(to: UInt8.self)
+            for i in 0..<(width * height) {
+                let color = heatColor(deltaE: deltaE[i])
+                target[i * 4] = color.r
+                target[i * 4 + 1] = color.g
+                target[i * 4 + 2] = color.b
+                target[i * 4 + 3] = color.a
+            }
+        }
+        guard let provider = CGDataProvider(data: pixels as CFData),
+              let image = CGImage(
+                width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent
+              ) else {
+            throw ColorCorrectionService.CorrectionError.bitmapContext
+        }
+        return image
     }
 }
