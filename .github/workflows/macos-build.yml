@@ -101,7 +101,7 @@ jobs:
           version=$(grep -o 'CFBundleShortVersionString</key><string>[^<]*' Packaging/Info.plist | sed 's/.*<string>//')
           [ -n "$version" ] || { echo "::error::version not found in Info.plist"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \\[/ {on=0} on' CHANGELOG.md > notes.md
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "::error::no changelog entry for $version"; exit 1; }
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
