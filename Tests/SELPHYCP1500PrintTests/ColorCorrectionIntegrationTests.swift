@@ -169,22 +169,23 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertLessThan(sums[1], sums[0])
     }
 
-    /// An image without an embedded profile must convert exactly like the same image tagged sRGB.
-    func testUntaggedSourceIsTreatedAsSRGB() throws {
+    /// A JPEG whose ICC segment has been removed (really untagged) must convert exactly like the
+    /// same JPEG tagged sRGB, and the interpretation must be reported.
+    func testUntaggedJPEGIsTreatedAsSRGB() throws {
         let profileURL = try realProfileURL()
         let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
-        let tagged = try makeSolidImageFile(type: .png, colorSpace: srgb, red: 0.55, green: 0.40, blue: 0.30)
-        let untagged = try makeSolidImageFile(type: .png, colorSpace: CGColorSpaceCreateDeviceRGB(), red: 0.55, green: 0.40, blue: 0.30)
+        let tagged = try makeSolidImageFile(type: .jpeg, colorSpace: srgb, red: 0.55, green: 0.40, blue: 0.30)
+        let untagged = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selphy-untagged-\(UUID().uuidString).jpg")
+        try Self.removeICCSegments(fromJPEG: try Data(contentsOf: tagged)).write(to: untagged)
         defer {
             try? FileManager.default.removeItem(at: tagged)
             try? FileManager.default.removeItem(at: untagged)
         }
-        for url in [tagged, untagged] {
-            let src = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
-            let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
-            let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
-            print("Untagged probe props \(url.lastPathComponent.prefix(12)): profileName=\(String(describing: props?[kCGImagePropertyProfileName])) colorModel=\(String(describing: props?[kCGImagePropertyColorModel])) csName=\(String(describing: image?.colorSpace?.name)) icc=\(image?.colorSpace?.copyICCData() != nil)")
-        }
+        let src = try XCTUnwrap(CGImageSourceCreateWithURL(untagged as CFURL, nil))
+        let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
+        print("Untagged probe: untagged fixture csName=\(String(describing: image?.colorSpace?.name)) icc=\(image?.colorSpace?.copyICCData() != nil) tagged-size=\((try? Data(contentsOf: tagged).count) ?? 0) untagged-size=\((try? Data(contentsOf: untagged).count) ?? 0)")
+
         var centres: [[UInt8]] = []
         for url in [tagged, untagged] {
             let result = try ColorCorrectionService.prepareCopies(
@@ -192,12 +193,34 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 intent: .relativeColorimetric, blackPointCompensation: false
             )
             defer { try? FileManager.default.removeItem(at: result.folder) }
-            print("Untagged probe \(url.lastPathComponent): assumed=\(result.assumedSRGBSources.count) converted=\(result.convertedSources.count)")
+            print("Untagged probe \(url == tagged ? "tagged" : "untagged"): assumed=\(result.assumedSRGBSources.count) converted=\(result.convertedSources.count)")
             let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
             centres.append(rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels))
         }
         let largestDifference = zip(centres[0], centres[1]).map { abs(Int($0) - Int($1)) }.max() ?? 0
         XCTAssertLessThanOrEqual(largestDifference, 2, "untagged RGB must behave as sRGB, got \(centres)")
+    }
+
+    /// Removes APP2 "ICC_PROFILE" segments from a JPEG byte stream (test fixture helper).
+    private static func removeICCSegments(fromJPEG data: Data) throws -> Data {
+        let bytes = [UInt8](data)
+        guard bytes.count > 4, bytes[0] == 0xFF, bytes[1] == 0xD8 else { throw CocoaError(.fileReadCorruptFile) }
+        var output: [UInt8] = [0xFF, 0xD8]
+        var i = 2
+        let signature = Array("ICC_PROFILE\0".utf8)
+        while i + 3 < bytes.count {
+            guard bytes[i] == 0xFF else { throw CocoaError(.fileReadCorruptFile) }
+            let marker = bytes[i + 1]
+            if marker == 0xDA { output += bytes[i...]; return Data(output) }
+            let length = Int(bytes[i + 2]) << 8 | Int(bytes[i + 3])
+            let end = i + 2 + length
+            guard end <= bytes.count else { throw CocoaError(.fileReadCorruptFile) }
+            let payload = bytes[(i + 4)..<end]
+            let isICC = marker == 0xE2 && payload.starts(with: signature)
+            if !isICC { output += bytes[i..<end] }
+            i = end
+        }
+        return Data(output)
     }
 
     // MARK: - Colour-core integration
