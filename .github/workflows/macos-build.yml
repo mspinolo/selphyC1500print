@@ -30,6 +30,14 @@ jobs:
         run: cmake --build build --parallel
       - name: Run core tests
         run: ctest --test-dir build --output-on-failure
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validation tools self-test (synthetic scans, no printer needed)
+        run: |
+          python3 -m pip install --quiet numpy pillow scipy tifffile
+          SELPHY_CORE_LIB="$PWD/build/libselphy_core_shared.so" python3 -W ignore -m unittest discover -s validation/tests -v
 
   build:
     runs-on: xcode-27

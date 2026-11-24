@@ -16,3 +16,7 @@ build/
 
 # Output of scripts/make-app.sh
 build-app/
+
+__pycache__/
+build/
+/results/

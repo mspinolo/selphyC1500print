@@ -65,3 +65,6 @@ The interface is in English by default; choose "Italiano" in the language picker
 
 ## Download and first launch
 Pre-releases are on the GitHub Releases page (zip + SHA-256). The app is ad-hoc signed and **not notarised**: after unzipping, open it with right-click → Open (or `xattr -dr com.apple.quarantine "SELPHY CP1500 Print.app"`). Versions `0.0.x` are pre-releases; `1.0.0` will only be published when the checklist in `Documentation/RELEASE.md` is complete.
+
+## Physical validation
+The procedure for validating the corrections with real prints (test chart, scanner-based measurement, report and acceptance gates) is in `Documentation/PHYSICAL_VALIDATION.md`; the tools are in `validation/` and are self-tested in CI with synthetic scans.

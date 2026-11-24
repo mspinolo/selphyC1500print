@@ -24,6 +24,15 @@ target_include_directories(selphy_core PUBLIC ${CMAKE_SOURCE_DIR}/Sources/SELPHY
 target_link_libraries(selphy_core PUBLIC lcms2_vendored)
 target_compile_options(selphy_core PRIVATE -Wall -Wextra -Werror)
 
+# Shared library for the Python validation tools (validation/); same sources as selphy_core.
+add_library(selphy_core_shared SHARED
+  ${CMAKE_SOURCE_DIR}/Sources/SELPHYColorCore/selphy_color_core.c ${LCMS_SOURCES})
+target_include_directories(selphy_core_shared
+  PUBLIC ${CMAKE_SOURCE_DIR}/Sources/SELPHYColorCore/include ${CMAKE_SOURCE_DIR}/Sources/CLittleCMS/include
+  PRIVATE ${CMAKE_SOURCE_DIR}/Sources/CLittleCMS/src)
+target_compile_definitions(selphy_core_shared PRIVATE HasTHREADS=1 HAVE_GMTIME_R=1)
+target_link_libraries(selphy_core_shared PRIVATE m Threads::Threads)
+
 enable_testing()
 if(EXISTS ${CMAKE_SOURCE_DIR}/Tests/CoreTests/core_tests.c)
   add_executable(core_tests ${CMAKE_SOURCE_DIR}/Tests/CoreTests/core_tests.c)

@@ -1,0 +1,1599 @@
+{
+ "chart_version": 1,
+ "width": 1181,
+ "height": 1748,
+ "format_mm": [
+  100,
+  148
+ ],
+ "patches": [
+  {
+   "id": "colorchecker-01",
+   "group": "colorchecker",
+   "name": "dark skin",
+   "srgb": [
+    115,
+    82,
+    68
+   ],
+   "rect": [
+    98,
+    200,
+    150,
+    150
+   ],
+   "lab_intended": [
+    38.2232,
+    12.7689,
+    13.9704
+   ]
+  },
+  {
+   "id": "colorchecker-02",
+   "group": "colorchecker",
+   "name": "light skin",
+   "srgb": [
+    194,
+    150,
+    130
+   ],
+   "rect": [
+    265,
+    200,
+    150,
+    150
+   ],
+   "lab_intended": [
+    65.9198,
+    14.9633,
+    17.2658
+   ]
+  },
+  {
+   "id": "colorchecker-03",
+   "group": "colorchecker",
+   "name": "blue sky",
+   "srgb": [
+    98,
+    122,
+    157
+   ],
+   "rect": [
+    432,
+    200,
+    150,
+    150
+   ],
+   "lab_intended": [
+    50.35,
+    -2.1268,
+    -21.9385
+   ]
+  },
+  {
+   "id": "colorchecker-04",
+   "group": "colorchecker",
+   "name": "foliage",
+   "srgb": [
+    87,
+    108,
+    67
+   ],
+   "rect": [
+    599,
+    200,
+    150,
+    150
+   ],
+   "lab_intended": [
+    43.08,
+    -14.1268,
+    20.2966
+   ]
+  },
+  {
+   "id": "colorchecker-05",
+   "group": "colorchecker",
+   "name": "blue flower",
+   "srgb": [
+    133,
+    128,
+    177
+   ],
+   "rect": [
+    766,
+    200,
+    150,
+    150
+   ],
+   "lab_intended": [
+    55.4395,
+    10.1761,
+    -25.3909
+   ]
+  },
+  {
+   "id": "colorchecker-06",
+   "group": "colorchecker",
+   "name": "bluish green",
+   "srgb": [
+    103,
+    189,
+    170
+   ],
+   "rect": [
+    933,
+    200,
+    150,
+    150
+   ],
+   "lab_intended": [
+    70.8268,
+    -30.7588,
+    1.1146
+   ]
+  },
+  {
+   "id": "colorchecker-07",
+   "group": "colorchecker",
+   "name": "orange",
+   "srgb": [
+    214,
+    126,
+    44
+   ],
+   "rect": [
+    98,
+    367,
+    150,
+    150
+   ],
+   "lab_intended": [
+    61.7152,
+    30.6922,
+    56.7097
+   ]
+  },
+  {
+   "id": "colorchecker-08",
+   "group": "colorchecker",
+   "name": "purplish blue",
+   "srgb": [
+    80,
+    91,
+    166
+   ],
+   "rect": [
+    265,
+    367,
+    150,
+    150
+   ],
+   "lab_intended": [
+    40.5667,
+    12.4433,
+    -42.5642
+   ]
+  },
+  {
+   "id": "colorchecker-09",
+   "group": "colorchecker",
+   "name": "moderate red",
+   "srgb": [
+    193,
+    90,
+    99
+   ],
+   "rect": [
+    432,
+    367,
+    150,
+    150
+   ],
+   "lab_intended": [
+    51.7813,
+    42.7459,
+    15.8051
+   ]
+  },
+  {
+   "id": "colorchecker-10",
+   "group": "colorchecker",
+   "name": "purple",
+   "srgb": [
+    94,
+    60,
+    108
+   ],
+   "rect": [
+    599,
+    367,
+    150,
+    150
+   ],
+   "lab_intended": [
+    30.9697,
+    22.3711,
+    -22.1177
+   ]
+  },
+  {
+   "id": "colorchecker-11",
+   "group": "colorchecker",
+   "name": "yellow green",
+   "srgb": [
+    157,
+    188,
+    64
+   ],
+   "rect": [
+    766,
+    367,
+    150,
+    150
+   ],
+   "lab_intended": [
+    72.1377,
+    -23.905,
+    56.3554
+   ]
+  },
+  {
+   "id": "colorchecker-12",
+   "group": "colorchecker",
+   "name": "orange yellow",
+   "srgb": [
+    224,
+    163,
+    46
+   ],
+   "rect": [
+    933,
+    367,
+    150,
+    150
+   ],
+   "lab_intended": [
+    71.5594,
+    16.0862,
+    65.0315
+   ]
+  },
+  {
+   "id": "colorchecker-13",
+   "group": "colorchecker",
+   "name": "blue",
+   "srgb": [
+    56,
+    61,
+    150
+   ],
+   "rect": [
+    98,
+    534,
+    150,
+    150
+   ],
+   "lab_intended": [
+    29.598,
+    20.4775,
+    -50.6666
+   ]
+  },
+  {
+   "id": "colorchecker-14",
+   "group": "colorchecker",
+   "name": "green",
+   "srgb": [
+    70,
+    148,
+    73
+   ],
+   "rect": [
+    265,
+    534,
+    150,
+    150
+   ],
+   "lab_intended": [
+    55.069,
+    -37.2501,
+    31.7439
+   ]
+  },
+  {
+   "id": "colorchecker-15",
+   "group": "colorchecker",
+   "name": "red",
+   "srgb": [
+    175,
+    54,
+    60
+   ],
+   "rect": [
+    432,
+    534,
+    150,
+    150
+   ],
+   "lab_intended": [
+    41.9322,
+    49.9702,
+    25.8692
+   ]
+  },
+  {
+   "id": "colorchecker-16",
+   "group": "colorchecker",
+   "name": "yellow",
+   "srgb": [
+    231,
+    199,
+    31
+   ],
+   "rect": [
+    599,
+    534,
+    150,
+    150
+   ],
+   "lab_intended": [
+    81.1849,
+    0.8212,
+    77.0939
+   ]
+  },
+  {
+   "id": "colorchecker-17",
+   "group": "colorchecker",
+   "name": "magenta",
+   "srgb": [
+    187,
+    86,
+    149
+   ],
+   "rect": [
+    766,
+    534,
+    150,
+    150
+   ],
+   "lab_intended": [
+    51.3235,
+    46.9238,
+    -14.6809
+   ]
+  },
+  {
+   "id": "colorchecker-18",
+   "group": "colorchecker",
+   "name": "cyan",
+   "srgb": [
+    8,
+    133,
+    161
+   ],
+   "rect": [
+    933,
+    534,
+    150,
+    150
+   ],
+   "lab_intended": [
+    50.7214,
+    -23.3193,
+    -24.0164
+   ]
+  },
+  {
+   "id": "colorchecker-19",
+   "group": "colorchecker",
+   "name": "white",
+   "srgb": [
+    243,
+    243,
+    242
+   ],
+   "rect": [
+    98,
+    701,
+    150,
+    150
+   ],
+   "lab_intended": [
+    95.8208,
+    -0.1314,
+    0.4831
+   ]
+  },
+  {
+   "id": "colorchecker-20",
+   "group": "colorchecker",
+   "name": "neutral 8",
+   "srgb": [
+    200,
+    200,
+    200
+   ],
+   "rect": [
+    265,
+    701,
+    150,
+    150
+   ],
+   "lab_intended": [
+    80.6041,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "colorchecker-21",
+   "group": "colorchecker",
+   "name": "neutral 6.5",
+   "srgb": [
+    160,
+    160,
+    160
+   ],
+   "rect": [
+    432,
+    701,
+    150,
+    150
+   ],
+   "lab_intended": [
+    65.8678,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "colorchecker-22",
+   "group": "colorchecker",
+   "name": "neutral 5",
+   "srgb": [
+    122,
+    122,
+    121
+   ],
+   "rect": [
+    599,
+    701,
+    150,
+    150
+   ],
+   "lab_intended": [
+    51.1993,
+    -0.1489,
+    0.5488
+   ]
+  },
+  {
+   "id": "colorchecker-23",
+   "group": "colorchecker",
+   "name": "neutral 3.5",
+   "srgb": [
+    85,
+    85,
+    85
+   ],
+   "rect": [
+    766,
+    701,
+    150,
+    150
+   ],
+   "lab_intended": [
+    36.1459,
+    -0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "colorchecker-24",
+   "group": "colorchecker",
+   "name": "black",
+   "srgb": [
+    52,
+    52,
+    52
+   ],
+   "rect": [
+    933,
+    701,
+    150,
+    150
+   ],
+   "lab_intended": [
+    21.7043,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "grey-01",
+   "group": "grey",
+   "name": "grey 0",
+   "srgb": [
+    0,
+    0,
+    0
+   ],
+   "rect": [
+    83,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "grey-02",
+   "group": "grey",
+   "name": "grey 26",
+   "srgb": [
+    26,
+    26,
+    26
+   ],
+   "rect": [
+    176,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    9.2632,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "grey-03",
+   "group": "grey",
+   "name": "grey 51",
+   "srgb": [
+    51,
+    51,
+    51
+   ],
+   "rect": [
+    269,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    21.2467,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "grey-04",
+   "group": "grey",
+   "name": "grey 76",
+   "srgb": [
+    76,
+    76,
+    76
+   ],
+   "rect": [
+    362,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    32.3186,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "grey-05",
+   "group": "grey",
+   "name": "grey 102",
+   "srgb": [
+    102,
+    102,
+    102
+   ],
+   "rect": [
+    455,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    43.1923,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "grey-06",
+   "group": "grey",
+   "name": "grey 128",
+   "srgb": [
+    128,
+    128,
+    128
+   ],
+   "rect": [
+    548,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    53.585,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "grey-07",
+   "group": "grey",
+   "name": "grey 153",
+   "srgb": [
+    153,
+    153,
+    153
+   ],
+   "rect": [
+    641,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    63.2226,
+    -0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "grey-08",
+   "group": "grey",
+   "name": "grey 178",
+   "srgb": [
+    178,
+    178,
+    178
+   ],
+   "rect": [
+    734,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    72.5748,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "grey-09",
+   "group": "grey",
+   "name": "grey 204",
+   "srgb": [
+    204,
+    204,
+    204
+   ],
+   "rect": [
+    827,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    82.0458,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "grey-10",
+   "group": "grey",
+   "name": "grey 230",
+   "srgb": [
+    230,
+    230,
+    230
+   ],
+   "rect": [
+    920,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    91.293,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "grey-11",
+   "group": "grey",
+   "name": "grey 255",
+   "srgb": [
+    255,
+    255,
+    255
+   ],
+   "rect": [
+    1013,
+    881,
+    85,
+    100
+   ],
+   "lab_intended": [
+    100.0,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "dark-01",
+   "group": "dark",
+   "name": "dark 0",
+   "srgb": [
+    0,
+    0,
+    0
+   ],
+   "rect": [
+    84,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-02",
+   "group": "dark",
+   "name": "dark 2",
+   "srgb": [
+    2,
+    2,
+    2
+   ],
+   "rect": [
+    186,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    0.5483,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-03",
+   "group": "dark",
+   "name": "dark 4",
+   "srgb": [
+    4,
+    4,
+    4
+   ],
+   "rect": [
+    288,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    1.0967,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-04",
+   "group": "dark",
+   "name": "dark 6",
+   "srgb": [
+    6,
+    6,
+    6
+   ],
+   "rect": [
+    390,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    1.645,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-05",
+   "group": "dark",
+   "name": "dark 8",
+   "srgb": [
+    8,
+    8,
+    8
+   ],
+   "rect": [
+    492,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    2.1934,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-06",
+   "group": "dark",
+   "name": "dark 12",
+   "srgb": [
+    12,
+    12,
+    12
+   ],
+   "rect": [
+    594,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    3.321,
+    -0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "dark-07",
+   "group": "dark",
+   "name": "dark 16",
+   "srgb": [
+    16,
+    16,
+    16
+   ],
+   "rect": [
+    696,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    4.6804,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-08",
+   "group": "dark",
+   "name": "dark 24",
+   "srgb": [
+    24,
+    24,
+    24
+   ],
+   "rect": [
+    798,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    8.2482,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-09",
+   "group": "dark",
+   "name": "dark 32",
+   "srgb": [
+    32,
+    32,
+    32
+   ],
+   "rect": [
+    900,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    12.25,
+    -0.0,
+    0.0
+   ]
+  },
+  {
+   "id": "dark-10",
+   "group": "dark",
+   "name": "dark 48",
+   "srgb": [
+    48,
+    48,
+    48
+   ],
+   "rect": [
+    1002,
+    1011,
+    96,
+    100
+   ],
+   "lab_intended": [
+    19.8655,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "primary-01",
+   "group": "primary",
+   "name": "red",
+   "srgb": [
+    255,
+    0,
+    0
+   ],
+   "rect": [
+    98,
+    1141,
+    150,
+    90
+   ],
+   "lab_intended": [
+    54.2896,
+    80.8144,
+    69.8897
+   ]
+  },
+  {
+   "id": "primary-02",
+   "group": "primary",
+   "name": "green",
+   "srgb": [
+    0,
+    255,
+    0
+   ],
+   "rect": [
+    265,
+    1141,
+    150,
+    90
+   ],
+   "lab_intended": [
+    87.8194,
+    -79.2749,
+    80.9927
+   ]
+  },
+  {
+   "id": "primary-03",
+   "group": "primary",
+   "name": "blue",
+   "srgb": [
+    0,
+    0,
+    255
+   ],
+   "rect": [
+    432,
+    1141,
+    150,
+    90
+   ],
+   "lab_intended": [
+    29.5659,
+    68.2862,
+    -112.0329
+   ]
+  },
+  {
+   "id": "primary-04",
+   "group": "primary",
+   "name": "cyan",
+   "srgb": [
+    0,
+    255,
+    255
+   ],
+   "rect": [
+    599,
+    1141,
+    150,
+    90
+   ],
+   "lab_intended": [
+    90.6664,
+    -50.663,
+    -14.961
+   ]
+  },
+  {
+   "id": "primary-05",
+   "group": "primary",
+   "name": "magenta",
+   "srgb": [
+    255,
+    0,
+    255
+   ],
+   "rect": [
+    766,
+    1141,
+    150,
+    90
+   ],
+   "lab_intended": [
+    60.1673,
+    93.5467,
+    -60.5027
+   ]
+  },
+  {
+   "id": "primary-06",
+   "group": "primary",
+   "name": "yellow",
+   "srgb": [
+    255,
+    255,
+    0
+   ],
+   "rect": [
+    933,
+    1141,
+    150,
+    90
+   ],
+   "lab_intended": [
+    97.6074,
+    -15.7479,
+    93.3913
+   ]
+  },
+  {
+   "id": "primary50-01",
+   "group": "primary50",
+   "name": "red 50%",
+   "srgb": [
+    127,
+    0,
+    0
+   ],
+   "rect": [
+    98,
+    1248,
+    150,
+    90
+   ],
+   "lab_intended": [
+    25.927,
+    48.2049,
+    39.1241
+   ]
+  },
+  {
+   "id": "primary50-02",
+   "group": "primary50",
+   "name": "green 50%",
+   "srgb": [
+    0,
+    127,
+    0
+   ],
+   "rect": [
+    265,
+    1248,
+    150,
+    90
+   ],
+   "lab_intended": [
+    45.9272,
+    -47.2867,
+    48.3113
+   ]
+  },
+  {
+   "id": "primary50-03",
+   "group": "primary50",
+   "name": "blue 50%",
+   "srgb": [
+    0,
+    0,
+    127
+   ],
+   "rect": [
+    432,
+    1248,
+    150,
+    90
+   ],
+   "lab_intended": [
+    11.1796,
+    40.732,
+    -66.8265
+   ]
+  },
+  {
+   "id": "primary50-04",
+   "group": "primary50",
+   "name": "cyan 50%",
+   "srgb": [
+    0,
+    127,
+    127
+   ],
+   "rect": [
+    599,
+    1248,
+    150,
+    90
+   ],
+   "lab_intended": [
+    47.6254,
+    -30.22,
+    -8.9241
+   ]
+  },
+  {
+   "id": "primary50-05",
+   "group": "primary50",
+   "name": "magenta 50%",
+   "srgb": [
+    127,
+    0,
+    127
+   ],
+   "rect": [
+    766,
+    1248,
+    150,
+    90
+   ],
+   "lab_intended": [
+    29.433,
+    55.7996,
+    -36.0892
+   ]
+  },
+  {
+   "id": "primary50-06",
+   "group": "primary50",
+   "name": "yellow 50%",
+   "srgb": [
+    127,
+    127,
+    0
+   ],
+   "rect": [
+    933,
+    1248,
+    150,
+    90
+   ],
+   "lab_intended": [
+    51.7656,
+    -9.3935,
+    55.7069
+   ]
+  },
+  {
+   "id": "skin-01",
+   "group": "skin",
+   "name": "skin 1",
+   "srgb": [
+    255,
+    224,
+    196
+   ],
+   "rect": [
+    98,
+    1368,
+    150,
+    90
+   ],
+   "lab_intended": [
+    91.2491,
+    7.9581,
+    17.8983
+   ]
+  },
+  {
+   "id": "skin-02",
+   "group": "skin",
+   "name": "skin 2",
+   "srgb": [
+    234,
+    192,
+    160
+   ],
+   "rect": [
+    265,
+    1368,
+    150,
+    90
+   ],
+   "lab_intended": [
+    80.864,
+    12.1945,
+    22.1252
+   ]
+  },
+  {
+   "id": "skin-03",
+   "group": "skin",
+   "name": "skin 3",
+   "srgb": [
+    205,
+    150,
+    115
+   ],
+   "rect": [
+    432,
+    1368,
+    150,
+    90
+   ],
+   "lab_intended": [
+    66.8899,
+    18.1481,
+    27.0222
+   ]
+  },
+  {
+   "id": "skin-04",
+   "group": "skin",
+   "name": "skin 4",
+   "srgb": [
+    170,
+    115,
+    80
+   ],
+   "rect": [
+    599,
+    1368,
+    150,
+    90
+   ],
+   "lab_intended": [
+    53.729,
+    19.4521,
+    28.5234
+   ]
+  },
+  {
+   "id": "skin-05",
+   "group": "skin",
+   "name": "skin 5",
+   "srgb": [
+    125,
+    80,
+    55
+   ],
+   "rect": [
+    766,
+    1368,
+    150,
+    90
+   ],
+   "lab_intended": [
+    38.8037,
+    17.3598,
+    22.8467
+   ]
+  },
+  {
+   "id": "skin-06",
+   "group": "skin",
+   "name": "skin 6",
+   "srgb": [
+    90,
+    58,
+    42
+   ],
+   "rect": [
+    933,
+    1368,
+    150,
+    90
+   ],
+   "lab_intended": [
+    27.9758,
+    13.0927,
+    16.0118
+   ]
+  },
+  {
+   "id": "nature-01",
+   "group": "nature",
+   "name": "sky",
+   "srgb": [
+    105,
+    150,
+    205
+   ],
+   "rect": [
+    98,
+    1488,
+    150,
+    90
+   ],
+   "lab_intended": [
+    60.5229,
+    -4.1923,
+    -33.5632
+   ]
+  },
+  {
+   "id": "nature-02",
+   "group": "nature",
+   "name": "deep sky",
+   "srgb": [
+    30,
+    80,
+    170
+   ],
+   "rect": [
+    265,
+    1488,
+    150,
+    90
+   ],
+   "lab_intended": [
+    34.9557,
+    10.5305,
+    -54.0978
+   ]
+  },
+  {
+   "id": "nature-03",
+   "group": "nature",
+   "name": "foliage",
+   "srgb": [
+    60,
+    110,
+    50
+   ],
+   "rect": [
+    432,
+    1488,
+    150,
+    90
+   ],
+   "lab_intended": [
+    41.8093,
+    -27.248,
+    27.6408
+   ]
+  },
+  {
+   "id": "nature-04",
+   "group": "nature",
+   "name": "grass",
+   "srgb": [
+    110,
+    160,
+    60
+   ],
+   "rect": [
+    599,
+    1488,
+    150,
+    90
+   ],
+   "lab_intended": [
+    60.7327,
+    -29.9939,
+    45.0201
+   ]
+  },
+  {
+   "id": "nature-05",
+   "group": "nature",
+   "name": "sand",
+   "srgb": [
+    205,
+    185,
+    140
+   ],
+   "rect": [
+    766,
+    1488,
+    150,
+    90
+   ],
+   "lab_intended": [
+    76.0402,
+    2.431,
+    25.6484
+   ]
+  },
+  {
+   "id": "nature-06",
+   "group": "nature",
+   "name": "rust",
+   "srgb": [
+    160,
+    80,
+    50
+   ],
+   "rect": [
+    933,
+    1488,
+    150,
+    90
+   ],
+   "lab_intended": [
+    43.8946,
+    32.1479,
+    33.2114
+   ]
+  },
+  {
+   "id": "uniformity-01",
+   "group": "uniformity",
+   "name": "grey tl",
+   "srgb": [
+    128,
+    128,
+    128
+   ],
+   "rect": [
+    194,
+    80,
+    60,
+    60
+   ],
+   "lab_intended": [
+    53.585,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "uniformity-02",
+   "group": "uniformity",
+   "name": "grey tr",
+   "srgb": [
+    128,
+    128,
+    128
+   ],
+   "rect": [
+    955,
+    80,
+    60,
+    60
+   ],
+   "lab_intended": [
+    53.585,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "uniformity-03",
+   "group": "uniformity",
+   "name": "grey bl",
+   "srgb": [
+    128,
+    128,
+    128
+   ],
+   "rect": [
+    166,
+    1608,
+    60,
+    60
+   ],
+   "lab_intended": [
+    53.585,
+    0.0,
+    -0.0
+   ]
+  },
+  {
+   "id": "uniformity-04",
+   "group": "uniformity",
+   "name": "grey br",
+   "srgb": [
+    128,
+    128,
+    128
+   ],
+   "rect": [
+    955,
+    1608,
+    60,
+    60
+   ],
+   "lab_intended": [
+    53.585,
+    0.0,
+    -0.0
+   ]
+  }
+ ],
+ "fiducials": [
+  {
+   "name": "tl",
+   "centre": [
+    122.0,
+    122.0
+   ],
+   "size": 84.0
+  },
+  {
+   "name": "tr",
+   "centre": [
+    1073.0,
+    108.0
+   ],
+   "size": 56.0
+  },
+  {
+   "name": "br",
+   "centre": [
+    1073.0,
+    1640.0
+   ],
+   "size": 56.0
+  },
+  {
+   "name": "bl",
+   "centre": [
+    108.0,
+    1640.0
+   ],
+   "size": 56.0
+  }
+ ],
+ "white_samples": [
+  {
+   "name": "white top",
+   "rect": [
+    330,
+    90,
+    520,
+    36
+   ]
+  },
+  {
+   "name": "white bottom",
+   "rect": [
+    330,
+    1622,
+    520,
+    36
+   ]
+  }
+ ],
+ "note": "Intended Lab = sRGB numbers -> Lab D50, relative colorimetric, no BPC."
+}
