@@ -128,17 +128,20 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [x] Defect (reported 2026-11-24): closing the window left the process running with no way to reopen a window (the "New Window" command is removed). Fixed: the app quits when its last window closes (`AppDelegate`, tested).
 
 ### M5b - Analysis tools (owner requests, 2026-11-24, after trying release 0.0.2)
-- [x] Bug: the gear button in the toolbar did nothing (the "showSettingsWindow:" responder action no longer works on macOS 14+): now uses `@Environment(\.openSettings)`.
-- [ ] Colour-deviation statistics for the loaded photos (beyond the current mean / 95th percentile / shares): dE00 histogram, median/max, shares above user-chosen thresholds, split by lightness zones (shadows, mid-tones, highlights); a summary table across all loaded photos to spot the problematic ones.
-- [ ] dE map with a user-adjustable scale (low and high dE for the colour ramp, with a legend) instead of the fixed 1 / 3 / 6.
-- [ ] "Too dark" overlay: highlight the pixels darker than the darkest tone the printer reproduces (merged or compressed shadows), with adjustable margin.
-- [ ] Out-of-gamut overlay: highlight the colours the printer cannot reach (saturated colours that are clipped or compressed), with adjustable sensitivity.
-- [ ] Pixel inspector: original colour, predicted print colour (Lab) and dE00 under the cursor.
-- [ ] 1:1 zoom and pan in the preview.
-- [ ] Postcard crop guide (100 x 148 mm): show on the preview what "Fill the paper" would cut, and the white margins of "Fit".
-- [ ] Automatic comparison of the three rendering intents per photo (mean/p95 dE, shadows, out-of-gamut share) with a suggestion of the best one and the reason.
-- [ ] Export of the analysis (statistics table, per photo) as CSV and PDF.
+- [x] Bug (fixed in 0.0.3): the gear button in the toolbar did nothing (the "showSettingsWindow:" responder action no longer works on macOS 14+): now uses `@Environment(\.openSettings)`.
+- [x] (done in 0.0.3, to be checked on a Mac) Colour-deviation statistics for the loaded photos (beyond the current mean / 95th percentile / shares): dE00 histogram, median/max, shares above user-chosen thresholds, split by lightness zones (shadows, mid-tones, highlights); a summary table across all loaded photos to spot the problematic ones.
+- [x] dE map with a user-adjustable scale (low and high dE for the colour ramp, with a legend) instead of the fixed 1 / 3 / 6.
+- [x] "Too dark" overlay: highlight the pixels darker than the darkest tone the printer reproduces (merged or compressed shadows), with adjustable margin.
+- [x] Out-of-gamut overlay: highlight the colours the printer cannot reach (saturated colours that are clipped or compressed), with adjustable sensitivity.
+- [x] Pixel inspector: original colour, predicted print colour (Lab) and dE00 under the cursor.
+- [x] 1:1 zoom and pan in the preview.
+- [x] Postcard crop guide (100 x 148 mm): show on the preview what "Fill the paper" would cut, and the white margins of "Fit".
+- [x] Automatic comparison of the three rendering intents per photo (mean/p95 dE, shadows, out-of-gamut share) with a suggestion of the best one and the reason.
+- [x] Export of the analysis (statistics table, per photo) as CSV and PDF.
 - [x] Bug (owner, 2026-11-25): some thumbnails stayed on the placeholder icon. Cause not reproducible here (no Mac): hardened on three fronts: the sandbox access of every picked or dropped photo is now held while it is in the list (`PhotoAccess`), the thumbnail falls back to the embedded thumbnail and then to a full decode and scale, and a failure shows a warning icon instead of the placeholder. To be confirmed by the owner on the same photos.
+
+- Implementation notes (0.0.3): the Statistics window (toolbar) shows the deviation distribution of the selected photo (histogram, median, 95th/99th percentile, shares above 1/2/3/6, split by lightness zone), the table of all loaded photos (worst first) and the three intents compared with a suggested one (lowest mean dE00, with caveats about shadows); CSV and PDF export. The preview has the views Dark zones (adjustable margin), Out of gamut (adjustable chroma loss), Postcard layout (Fit/Fill, cropped part dimmed), an adjustable dE scale with legend, zoom (Fit/100/200/400%) and a pixel readout. Everything is computed on a reduced copy (512 px) from the printer profile's model.
+- [ ] Open: the "out of gamut" overlay is a model heuristic (chroma the print loses against the intended colour), not a gamut-boundary test; check it against real prints on print day.
 
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.

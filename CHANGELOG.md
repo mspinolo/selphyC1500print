@@ -3,6 +3,26 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.3] - 2026-11-25
+Third pre-release. Not verified on physical prints.
+
+### Added
+- Statistics window: deviation distribution of the selected photo (histogram, median and
+  percentiles, shares above thresholds, split by lightness zone), table of all loaded photos,
+  comparison of the three rendering intents with a suggestion, CSV and PDF export.
+- Preview views: Dark zones (shadows the printer cannot reproduce, adjustable margin), Out of
+  gamut (adjustable chroma loss), Postcard layout (Fit/Fill with the cut part dimmed); adjustable
+  dE scale with a colour legend; zoom 100/200/400%; readout of the colour under the pointer
+  (original and predicted Lab, dE00).
+
+### Fixed
+- The Settings button in the toolbar did nothing (macOS 14+).
+- Thumbnails stayed on the placeholder for some photos: access to listed photos is now held,
+  with fallbacks and a warning icon on failure.
+
+### Changed
+- CI: actions/checkout and actions/setup-python updated to v7 (Node 24).
+
 ## [0.0.2] - 2026-11-24
 Second pre-release. Not verified on physical prints.
 

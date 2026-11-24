@@ -169,8 +169,10 @@ final class WindowTests: XCTestCase {
         try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 520), name: "6-settings-it", wait: 1, to: out)
         settings.language = .english
         try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 520), name: "7-settings-en", wait: 1, to: out)
+        try snapshot(StatisticsView(photos: files, selected: files[0]).environmentObject(settings),
+                     size: CGSize(width: 820, height: 760), name: "8-statistics-en", wait: 8, to: out)
 
         let written = try FileManager.default.contentsOfDirectory(atPath: out.path).filter { $0.hasSuffix(".png") }
-        XCTAssertEqual(written.count, 7)
+        XCTAssertEqual(written.count, 8)
     }
 }
