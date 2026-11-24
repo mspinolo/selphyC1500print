@@ -94,12 +94,13 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [x] Swift: stats, translucent dE heat map ("Mappa dE" view), collapsible "Dettagli colore" panel (meaning of the three views, source profile and interpretation, display profile, checks, black-and-white note). CI: grey/red/dark-grey stats, heat map, descriptions.
 - [x] Measured relative + BPC vs perceptual vs relative on shadows (table above).
 - [ ] Decide what the UI recommends for black-and-white photos (needs a print to judge shadow detail against neutrality; for now the panel only reports residual tint and the share of shadows below the darkest tone).
-- [ ] Preview speed: 3000x2000 source took 6.0 s on the CI runner (decode, correction, analysis, two renderings). Every toggle currently recomputes everything; cache the decoded source and the corrected buffers per (photo, intent, BPC) so that display options only re-render. Check on the owner's Mac first.
+- [x] Preview speed: `PreviewSession` keeps the stages in memory (decoded and corrected buffers, checks and dE map per photo/intent/BPC/profile, the printer-to-display transform, the two renderings; LRU 3/6/8 entries; invalidated by the file's modification date read from the file system - a test caught that `URL` caches it). The checks and the dE map run on a copy reduced to 512 px, the out-of-gamut share on the same sample. CI runner, 3000x2000 source: 6.0 s before, now 1.9 s cold, 0.8 s when only a display option changes, 5 ms for an identical request. Counters in the tests assert that nothing is recomputed that should not be.
 - [ ] Later, lower priority: a*-b* plot of the printer gamut versus sRGB with the photo's colours.
 
 **M3.2 Application shell**
 - [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
-- [ ] Export to a user-chosen folder instead of a hidden temp folder; progress and cancellation; clear errors; show the profile report again after a restart.
+- [x] Save the corrected copies to a user-chosen folder ("Salva in una cartella..."): `ExportService` only adds files (existing names get " 2", " 3"), never overwrites or deletes, removes only what the failed call itself created; temporary copies stay until the 24-hour cleanup; outputs are named `<name>_SELPHY.<ext>`; the settings used are shown. Tested (clash, repeat, partial failure, not a folder).
+- [ ] Remember the last save folder (security-scoped bookmark, with the sandbox entitlement); progress and cancellation; clear errors; show the profile report again after a restart.
 - [x] Input scope: JPEG, JPEG XL, PNG, TIFF (HEIC not included).
 - [ ] UI language (Italian now; decide whether to localise).
 
