@@ -51,6 +51,7 @@ The plan, milestones and evidence levels are maintained in [`Documentation/ROADM
 
 ## Privacy
 
+- Preview: a model-based soft proof shows the original, the expected print without correction and with correction (slider), computed from the printer profile's forward model and the display's ColorSync profile. It is a simulation, not a print proof, and has not been validated with physical prints.
 - Source images are never modified.
 - The app does not embed the ICC profile: the user selects it at runtime. A copy is kept at the repository root for tests.
 - Temporary copies are stored outside the photo library.

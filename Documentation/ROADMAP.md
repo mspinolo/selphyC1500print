@@ -71,12 +71,14 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 ### M3 - Real application
 Order of work: M3.1 preview first (it is also the tool to judge the correction without printing), then the bundle, then the rest.
 
-**M3.1 Soft-proof preview (model-based)**
-- [ ] Core: `selphy_preview_create/apply` (printer profile used as an input device profile -> display profile, intent and BPC selectable, paper white normalised by default, optional paper-white simulation). Portable C, tested on Linux.
-- [ ] Core tests: (a) preview of the corrected values vs the original in dE00 on the chart (same tolerances as the end-to-end test); (b) preview of the uncorrected values equals the model baseline already measured (mean 9.25); (c) paper-white and black behaviour; (d) out-of-display-gamut clipping is reported, not silent.
-- [ ] Swift: three views (original / without correction / with correction) with a before/after slider; computed on a downscaled copy (fast), full-resolution only on export.
-- [ ] Display profile: ask ColorSync for the current display profile; fall back to sRGB. Needs a check on the owner's Mac (not verifiable in CI).
-- [ ] UI wording: "simulation from the printer profile, not a print proof; not validated with physical prints"; note that colours outside the monitor gamut are clipped in the preview.
+**M3.1 Soft-proof preview (model-based) - implemented, to be checked on the owner's Mac**
+- [x] Core: `selphy_preview_create/apply_rgb8/free` (printer profile as input device profile -> display profile; relative colorimetric, optional paper-white simulation = absolute, optional black stretch; out-of-display-gamut pixel count). Portable C, tested on Linux (mutation-checked: BPC entry, paper white, gamut count). A printer profile is rejected as display profile.
+- [x] Core tests, results: preview vs the independent A2B Lab model <= 0.54 dE00 (neutrals, skin); with correction the preview is 3.0 dE00 from the original, without 9.0 (same figures as the model check); paper white 255/255/255 relative vs 240/240/245 absolute; the printer's black shows as a lifted dark with a bluish cast (17/36/51), 0/6/36 with the black stretch; 213 of 729 device colours fall outside sRGB, the neutral axis never does.
+- [x] Swift: `PreviewService` (reduced-size decode through the export code path, EXIF orientation, corrected vs uncorrected device values, display profile with sRGB fallback), `PreviewPanel` (Original / Without / With correction / Compare with a draggable divider, re-rendered when photo, intent, BPC or options change). macOS CI: preview with correction 3.05 dE00 from the original, without 9.00; size reduction, orientation, display fallback and no-clipping-for-neutrals tested.
+- [x] Display profile: taken from the screen's ColorSync profile, sRGB fallback if unusable.
+- [x] UI wording: simulation from the printer profile, not a print proof, not validated with physical prints; out-of-gamut share shown when above 0.5%.
+- [ ] Owner check on a real Mac (not verifiable in CI): the panel layout and the slider, the display profile of a wide-gamut screen (P3), responsiveness on a large photo.
+- [ ] Known limits: the preview normalises the original to sRGB (a wide-gamut source is shown clipped to sRGB in the "Original" view); gamut-clipping count is best effort for display profiles that clip in float.
 
 **M3.2 Application shell**
 - [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
