@@ -179,6 +179,12 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             try? FileManager.default.removeItem(at: tagged)
             try? FileManager.default.removeItem(at: untagged)
         }
+        for url in [tagged, untagged] {
+            let src = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+            let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+            let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
+            print("Untagged probe props \(url.lastPathComponent.prefix(12)): profileName=\(String(describing: props?[kCGImagePropertyProfileName])) colorModel=\(String(describing: props?[kCGImagePropertyColorModel])) csName=\(String(describing: image?.colorSpace?.name)) icc=\(image?.colorSpace?.copyICCData() != nil)")
+        }
         var centres: [[UInt8]] = []
         for url in [tagged, untagged] {
             let result = try ColorCorrectionService.prepareCopies(
@@ -564,8 +570,8 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             summary[quality] = (sum / Double(pixelCount), worst)
             print("JPEG penalty q=\(quality): mean dE00=\(sum / Double(pixelCount)) max dE00=\(worst)")
         }
-        // Generous placeholder bound until the measurement is recorded; tightened afterwards.
-        XCTAssertLessThanOrEqual(summary[0.98]?.mean ?? 99, 2.0)
+        // Measured on CI (macOS 27, textured 96x64 image, +-8 noise): mean 0.66 / max 4.1 dE00 at q=0.98.
+        XCTAssertLessThanOrEqual(summary[0.98]?.mean ?? 99, 1.0, "measured 0.66 on CI")
     }
 
     private func correctedPixels(of url: URL, profileURL: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {
