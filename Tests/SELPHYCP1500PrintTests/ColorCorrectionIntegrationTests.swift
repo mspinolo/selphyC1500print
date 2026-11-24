@@ -595,6 +595,92 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertLessThanOrEqual(summary[0.98]?.mean ?? 99, 1.0, "measured 0.66 on CI")
     }
 
+    // MARK: - Soft-proof preview
+
+    private func makePreview(of url: URL, intent: RenderingIntent = .relativeColorimetric,
+                             display: PreviewService.Display? = nil, maxDimension: Int = 1400) throws -> PreviewService.Preview {
+        let printerICC = try Data(contentsOf: try realProfileURL())
+        var options = PreviewService.Options(intent: intent, blackPointCompensation: false)
+        options.maxDimension = maxDimension
+        return try PreviewService.makePreview(sourceURL: url, printerICC: printerICC, display: display, options: options)
+    }
+
+    /// The preview with correction must look like the original, the one without must not
+    /// (judged by the printer model through an independent path: sRGB numbers -> Lab).
+    func testPreviewWithCorrectionIsCloserToTheOriginal() throws {
+        let sourceURL = try makeColorChartJPEG()
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        let preview = try makePreview(of: sourceURL)
+        XCTAssertFalse(preview.usedSRGBFallback)
+
+        let offsets = patchOffsets()
+        func patches(_ image: CGImage) throws -> [UInt8] {
+            let pixels = try rgbaPixels(of: image)
+            return offsets.flatMap { rgb(at: $0, in: pixels.pixels) }
+        }
+        let original = intendedLab(rgb8: try patches(preview.original))
+        let withCorrection = intendedLab(rgb8: try patches(preview.corrected))
+        let withoutCorrection = intendedLab(rgb8: try patches(preview.uncorrected))
+
+        var sumWith = 0.0, sumWithout = 0.0
+        for patch in 0..<32 {
+            sumWith += deltaE(withCorrection, original, patch: patch)
+            sumWithout += deltaE(withoutCorrection, original, patch: patch)
+        }
+        print("Preview check: mean dE00 with correction=\(sumWith / 32), without=\(sumWithout / 32), out-of-gamut=\(preview.outOfGamutFraction)")
+        XCTAssertLessThanOrEqual(sumWith, 0.5 * sumWithout, "the corrected preview must be at least twice as close to the original")
+        for patch in neutralPatches + skinPatches {
+            let de = deltaE(withCorrection, original, patch: patch)
+            XCTAssertLessThanOrEqual(de, 1.5, "patch \(patch) dE00 \(de)")
+        }
+        XCTAssertGreaterThanOrEqual(preview.outOfGamutFraction, 0)
+        XCTAssertLessThanOrEqual(preview.outOfGamutFraction, 1)
+    }
+
+    /// The pixels of the preview's corrected device values come from the export code path:
+    /// the exported file, viewed through the same printer model, must give the same preview.
+    func testPreviewReducesSizeAndAppliesOrientation() throws {
+        let tiff = try makeOrientedTIFF(orientation: 6)
+        let textured = try makeTexturedImage(colorSpace: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)))
+        defer {
+            try? FileManager.default.removeItem(at: tiff)
+            try? FileManager.default.removeItem(at: textured)
+        }
+        let rotated = try makePreview(of: tiff)
+        XCTAssertEqual(rotated.corrected.width, 4)
+        XCTAssertEqual(rotated.corrected.height, 6)
+        XCTAssertEqual(rotated.original.width, 4)
+        XCTAssertEqual(rotated.uncorrected.height, 6)
+
+        let reduced = try makePreview(of: textured, maxDimension: 32)
+        XCTAssertEqual(reduced.corrected.width, 32)
+        XCTAssertEqual(reduced.corrected.height, 21)
+        let untouched = try makePreview(of: textured, maxDimension: 1400)
+        XCTAssertEqual(untouched.corrected.width, 96, "a small image must not be enlarged")
+    }
+
+    func testPreviewFallsBackToSRGBForUnusableDisplayProfile() throws {
+        let sourceURL = try makeSolidImageFile(
+            type: .png, colorSpace: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+            red: 0.5, green: 0.5, blue: 0.5
+        )
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        // A printer profile is not a display profile: the core rejects it and the service falls back.
+        let bogus = PreviewService.Display(iccData: try Data(contentsOf: try realProfileURL()), colorSpace: srgb)
+        XCTAssertTrue(try makePreview(of: sourceURL, display: bogus).usedSRGBFallback)
+        XCTAssertFalse(try makePreview(of: sourceURL, display: nil).usedSRGBFallback)
+        let valid = PreviewService.Display(iccData: try XCTUnwrap(srgb.copyICCData() as Data?), colorSpace: srgb)
+        XCTAssertFalse(try makePreview(of: sourceURL, display: valid).usedSRGBFallback)
+    }
+
+    /// Greys correct to greys inside any display gamut: nothing may be reported as clipped.
+    func testPreviewReportsNoClippingForNeutralImage() throws {
+        let url = try makeGrayImageFile(level: 0.5)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertEqual(try makePreview(of: url).outOfGamutFraction, 0)
+    }
+
     private func correctedPixels(of url: URL, profileURL: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {
         let result = try ColorCorrectionService.prepareCopies(
             from: [url], printerProfileURL: profileURL,
@@ -748,7 +834,11 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
 
     private func rgbaPixels(from url: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
-        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        return try rgbaPixels(of: try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil)))
+    }
+
+    /// Pixels of an image rendered into sRGB RGBA (exact for images that are already sRGB).
+    private func rgbaPixels(of image: CGImage) throws -> (width: Int, height: Int, pixels: [UInt8]) {
         let width = image.width
         let height = image.height
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))

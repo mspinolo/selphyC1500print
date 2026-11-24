@@ -8,7 +8,7 @@ struct SELPHYCP1500PrintApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(settings)
-                .frame(minWidth: 760, minHeight: 680)
+                .frame(minWidth: 820, minHeight: 900)
         }
         .commands {
             CommandGroup(replacing: .newItem) {}

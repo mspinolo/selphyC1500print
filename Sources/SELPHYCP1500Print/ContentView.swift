@@ -131,6 +131,8 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            PreviewPanel(photos: selectedPhotos)
+
             if !generatedCopies.isEmpty {
                 GroupBox("Copie di prova generate") {
                     VStack(alignment: .leading, spacing: 8) {

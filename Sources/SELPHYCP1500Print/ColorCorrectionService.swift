@@ -179,16 +179,25 @@ enum ColorCorrectionService {
         )
     }
 
-    @discardableResult
-    private static func correct(
-        sourceURL: URL,
-        outputURL: URL,
-        printerICC: Data,
-        intent: RenderingIntent,
-        blackPointCompensation: Bool,
-        outputFormat: OutputFormat,
-        transformCache: inout [Data: ColorTransform]
-    ) throws -> SourceInterpretation {
+    /// A decoded source: 16-bit big-endian RGBX pixels (not yet oriented) plus how its colour
+    /// was interpreted.
+    struct LoadedSource {
+        let pixels: Data
+        let width: Int
+        let height: Int
+        let orientation: Int
+        /// ICC data of the source colour space; nil means the pixels are sRGB.
+        let embeddedICC: Data?
+        let interpretation: SourceInterpretation
+        let dpi: (width: Double, height: Double)?
+    }
+
+    /// Decodes the first image of a file to 16-bit RGBX.
+    /// - Parameters:
+    ///   - maxDimension: if the longest side is larger, the image is scaled down while decoding
+    ///     (used by the preview; the export always decodes at full size).
+    ///   - forceSRGB: decode into sRGB even when the file has its own profile.
+    static func loadSource(from sourceURL: URL, maxDimension: Int? = nil, forceSRGB: Bool = false) throws -> LoadedSource {
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw CorrectionError.unreadableImage(sourceURL)
@@ -196,16 +205,15 @@ enum ColorCorrectionService {
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let rawOrientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
         let orientation = (1...8).contains(rawOrientation) ? rawOrientation : 1
-        let sourceDPI = Self.resolution(from: properties)
 
         guard let imageColorSpace = image.colorSpace else {
             throw CorrectionError.unsupportedColorSpace(sourceURL)
         }
 
-        // RGB sources use their embedded profile; without one they are assumed sRGB. Grayscale, CMYK, Lab
-        // and indexed sources are converted to sRGB by Core Graphics while decoding, using
-        // their own profile, and then go through the same transform.
-        let interpretation: SourceInterpretation
+        // RGB sources use their embedded profile; without one they are assumed sRGB. Grayscale,
+        // CMYK, Lab and indexed sources are converted to sRGB by Core Graphics while decoding,
+        // using their own profile, and then go through the same transform.
+        var interpretation: SourceInterpretation
         var embeddedICC: Data?
         switch imageColorSpace.model {
         case .rgb where imageColorSpace.numberOfComponents == 3:
@@ -221,37 +229,28 @@ enum ColorCorrectionService {
             throw CorrectionError.unsupportedColorSpace(sourceURL)
         }
         let decodeSpace: CGColorSpace
-        if interpretation != .embeddedProfile {
+        if interpretation != .embeddedProfile || forceSRGB {
+            if forceSRGB && interpretation == .embeddedProfile { interpretation = .convertedToSRGB }
             embeddedICC = nil
             decodeSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         } else {
             decodeSpace = imageColorSpace
         }
 
-        let cacheKey = embeddedICC ?? Data()
-        let transform: ColorTransform
-        if let cached = transformCache[cacheKey] {
-            transform = cached
-        } else {
-            transform = try ColorTransform(
-                sourceICC: embeddedICC,
-                printerICC: printerICC,
-                intent: intent,
-                blackPointCompensation: blackPointCompensation
-            )
-            transformCache[cacheKey] = transform
+        try validateDimensions(width: image.width, height: image.height)
+        var width = image.width
+        var height = image.height
+        if let maxDimension, max(width, height) > maxDimension {
+            let scale = Double(maxDimension) / Double(max(width, height))
+            width = max(1, Int((Double(width) * scale).rounded()))
+            height = max(1, Int((Double(height) * scale).rounded()))
         }
-
-        let width = image.width
-        let height = image.height
-        try validateDimensions(width: width, height: height)
-        let (outputWidth, outputHeight) = orientedSize(width: width, height: height, orientation: orientation)
         let sourceBytesPerRow = width * 8
 
-        // The source is decoded to 16 bits per component (8 bytes/pixel, RGBX) so that 16-bit
-        // and linear sources keep their precision; the result is 4 bytes/pixel.
-        var sourcePixels = Data(count: sourceBytesPerRow * height)
-        let sourceContextCreated = sourcePixels.withUnsafeMutableBytes { rawBuffer -> Bool in
+        // 16 bits per component (8 bytes/pixel, RGBX) so that 16-bit and linear sources keep
+        // their precision.
+        var pixels = Data(count: sourceBytesPerRow * height)
+        let contextCreated = pixels.withUnsafeMutableBytes { rawBuffer -> Bool in
             guard let context = CGContext(
                 data: rawBuffer.baseAddress,
                 width: width,
@@ -271,30 +270,26 @@ enum ColorCorrectionService {
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        guard sourceContextCreated else { throw CorrectionError.bitmapContext }
+        guard contextCreated else { throw CorrectionError.bitmapContext }
 
-        // EXIF orientation is applied while the converted pixels are written, at full precision.
-        let correctedPixels = try convertRGBX16Pixels(
-            sourcePixels,
-            width: width,
-            height: height,
-            transform: transform,
-            orientation: orientation
+        return LoadedSource(
+            pixels: pixels, width: width, height: height, orientation: orientation,
+            embeddedICC: embeddedICC, interpretation: interpretation,
+            dpi: resolution(from: properties)
         )
-        sourcePixels = Data()
+    }
 
-        // Deliberately re-tag the corrected numeric RGB values as sRGB. The
-        // SELPHY has a fixed internal color pipeline; the profile is used to
-        // pre-adjust its expected input values, not installed in the printer.
-        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let provider = CGDataProvider(data: correctedPixels as CFData),
-              let correctedImage = CGImage(
-                width: outputWidth,
-                height: outputHeight,
+    /// Wraps oriented 8-bit RGBX pixels (alpha byte ignored) into a CGImage.
+    static func makeImage(rgbx: Data, width: Int, height: Int, colorSpace: CGColorSpace) throws -> CGImage {
+        guard rgbx.count == width * height * 4,
+              let provider = CGDataProvider(data: rgbx as CFData),
+              let image = CGImage(
+                width: width,
+                height: height,
                 bitsPerComponent: 8,
                 bitsPerPixel: 32,
-                bytesPerRow: outputWidth * 4,
-                space: sRGB,
+                bytesPerRow: width * 4,
+                space: colorSpace,
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)),
                 provider: provider,
                 decode: nil,
@@ -303,6 +298,55 @@ enum ColorCorrectionService {
               ) else {
             throw CorrectionError.bitmapContext
         }
+        return image
+    }
+
+    @discardableResult
+    private static func correct(
+        sourceURL: URL,
+        outputURL: URL,
+        printerICC: Data,
+        intent: RenderingIntent,
+        blackPointCompensation: Bool,
+        outputFormat: OutputFormat,
+        transformCache: inout [Data: ColorTransform]
+    ) throws -> SourceInterpretation {
+        var loaded = try loadSource(from: sourceURL)
+
+        let cacheKey = loaded.embeddedICC ?? Data()
+        let transform: ColorTransform
+        if let cached = transformCache[cacheKey] {
+            transform = cached
+        } else {
+            transform = try ColorTransform(
+                sourceICC: loaded.embeddedICC,
+                printerICC: printerICC,
+                intent: intent,
+                blackPointCompensation: blackPointCompensation
+            )
+            transformCache[cacheKey] = transform
+        }
+
+        let (outputWidth, outputHeight) = orientedSize(width: loaded.width, height: loaded.height, orientation: loaded.orientation)
+
+        // EXIF orientation is applied while the converted pixels are written, at full precision.
+        let correctedPixels = try convertRGBX16Pixels(
+            loaded.pixels,
+            width: loaded.width,
+            height: loaded.height,
+            transform: transform,
+            orientation: loaded.orientation
+        )
+        let orientation = loaded.orientation
+        let sourceDPI = loaded.dpi
+        let interpretation = loaded.interpretation
+        loaded = LoadedSource(pixels: Data(), width: 0, height: 0, orientation: 1, embeddedICC: nil, interpretation: interpretation, dpi: nil)
+
+        // Deliberately re-tag the corrected numeric RGB values as sRGB. The
+        // SELPHY has a fixed internal color pipeline; the profile is used to
+        // pre-adjust its expected input values, not installed in the printer.
+        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+        let correctedImage = try makeImage(rgbx: correctedPixels, width: outputWidth, height: outputHeight, colorSpace: sRGB)
 
         let outputType: UTType = outputFormat == .png ? .png : .jpeg
         guard let destination = CGImageDestinationCreateWithURL(
@@ -375,7 +419,7 @@ enum ColorCorrectionService {
         }
     }
 
-    /// Applies the colour transform to a 16-bit big-endian RGBX Core Graphics buffer
+    /// Applies the colour transform (none: just repack and orient) to a 16-bit big-endian RGBX Core Graphics buffer
     /// (8 bytes/pixel, the fourth component is padding) and returns 8-bit RGBX
     /// (4 bytes/pixel) with the EXIF orientation applied. Blocks of rows are converted in
     /// parallel (the transform is thread-safe: no cache, no shared scratch); each 16-bit
@@ -385,7 +429,7 @@ enum ColorCorrectionService {
         _ sourcePixels: Data,
         width: Int,
         height: Int,
-        transform: ColorTransform,
+        transform: ColorTransform?,
         orientation: Int = 1
     ) throws -> Data {
         try validateDimensions(width: width, height: height)
@@ -422,7 +466,12 @@ enum ColorCorrectionService {
                             target[x * 3 + 2] = UInt16(bigEndian: rowBase.loadUnaligned(fromByteOffset: offset + 4, as: UInt16.self))
                         }
                     }
-                    transform.apply16(input, to: converted, pixelCount: pixelCount)
+                    if let transform {
+                        transform.apply16(input, to: converted, pixelCount: pixelCount)
+                    } else {
+                        // No colour transform: only repack to 8 bit and orient.
+                        converted.update(from: input, count: pixelCount * 3)
+                    }
                     for row in 0..<rows {
                         let sy = firstRow + row
                         for x in 0..<width {
