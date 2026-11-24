@@ -23,7 +23,7 @@ every release's notes.
 ## How to release
 1. Update `CHANGELOG.md` (a `## [x.y.z]` section is required: it becomes the release notes)
    and the version in `Packaging/Info.plist`; merge to `main` with green CI.
-2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
+2. Either push the tag (`git tag vX.Y.Z && git push origin vX.Y.Z`) or run the workflow manually (Actions → macOS build → Run workflow, "release" ticked): the CI then creates the tag.
 3. The workflow rebuilds, tests, verifies, and publishes the zip and its SHA-256 as a GitHub
    release (a pre-release for `0.x`).
 

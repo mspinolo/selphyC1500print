@@ -11,6 +11,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a GitHub release (tag v<version from Packaging/Info.plist>) from this commit'
+        type: boolean
+        default: false
 
 jobs:
   core-linux:
@@ -78,7 +83,7 @@ jobs:
 
   release:
     # Publishes a GitHub release when a v* tag is pushed, after build and tests have passed.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
     needs: [core-linux, build]
     runs-on: ubuntu-latest
     permissions:
@@ -93,14 +98,18 @@ jobs:
           path: dist
       - name: Extract release notes from the changelog
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version=$(grep -o 'CFBundleShortVersionString</key><string>[^<]*' Packaging/Info.plist | sed 's/.*<string>//')
+          [ -n "$version" ] || { echo "::error::version not found in Info.plist"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \\[/ {on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "::error::no changelog entry for $version"; exit 1; }
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: v${{ env.VERSION }}
           body_path: notes.md
           # 0.x releases are pre-releases: not yet fully verified (see Documentation/ROADMAP.md).
-          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          prerelease: ${{ startsWith(env.VERSION, '0.') }}
           files: dist/*
