@@ -26,6 +26,8 @@ struct ContentView: View {
     @State private var profileReport: ICCProfileReport?
     @State private var profileError: String?
     @State private var generatedCopies: [URL] = []
+    @StateObject private var printService = PrintService()
+    @State private var isPrinting = false
     @State private var generatedFolder: URL?
     @State private var generatedSummary = ""
     @State private var showingSaveFolderPicker = false
@@ -188,6 +190,8 @@ struct ContentView: View {
                                     NSWorkspace.shared.open(generatedFolder)
                                 }
                             }
+                            Button(tr("Print…")) { printCopies() }
+                                .disabled(isPrinting)
                             if settings.saveFolderBookmark != nil {
                                 Button(tr("Save to another folder…")) { showingSaveFolderPicker = true }
                                 Button(trf("Save to %@", settings.saveFolderDisplayName)) { saveToRememberedFolder() }
@@ -197,6 +201,13 @@ struct ContentView: View {
                                     .buttonStyle(.borderedProminent)
                             }
                         }
+                        Picker(tr("Image placement"), selection: $settings.printFit) {
+                            ForEach(PrintFit.allCases) { fit in
+                                Text(fit.title).tag(fit)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 520)
                         if settings.saveFolderBookmark != nil {
                             HStack {
                                 Text(trf("Remembered save folder: %@", settings.saveFolderDisplayName))
@@ -226,9 +237,6 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(statusMessage)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text(tr("Direct printing is not enabled yet."))
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -281,6 +289,42 @@ struct ContentView: View {
         case .failure(let error):
             statusMessage = trf("Folder selection failed: %@", error.localizedDescription)
         }
+    }
+
+    /// Sends the generated copies to the macOS print dialog (AirPrint is the only path for the CP1500).
+    private func printCopies() {
+        guard !generatedCopies.isEmpty, !isPrinting else { return }
+        if !settings.hidePrintNotice, !confirmPrintNotice() { return }
+        isPrinting = true
+        let files = generatedCopies
+        let fit = settings.printFit
+        Task {
+            let outcome = await printService.print(files: files, fit: fit, in: NSApp.keyWindow)
+            switch outcome {
+            case .sent(let count):
+                statusMessage = trn(count, one: "Sent 1 copy to the printer.", other: "Sent %d copies to the printer.")
+            case .cancelled(let sent):
+                statusMessage = sent == 0
+                    ? tr("Printing cancelled.")
+                    : trn(sent, one: "Printing cancelled after 1 copy.", other: "Printing cancelled after %d copies.")
+            case .failed(let error):
+                statusMessage = trf("Printing failed: %@", error.localizedDescription)
+            }
+            isPrinting = false
+        }
+    }
+
+    private func confirmPrintNotice() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = tr("Before printing")
+        alert.informativeText = tr("On the printer, switch Image Optimize off (Setup > Print settings): it would correct brightness and contrast again after this correction, and it resets when the printer is turned off. In the print dialog choose the Postcard paper size and leave scaling and any colour adjustment off. Printing is experimental and has not been validated with physical prints.")
+        alert.addButton(withTitle: tr("Continue"))
+        alert.addButton(withTitle: tr("Cancel"))
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = tr("Don't show this again")
+        let proceed = alert.runModal() == .alertFirstButtonReturn
+        if proceed, alert.suppressionButton?.state == .on { settings.hidePrintNotice = true }
+        return proceed
     }
 
     private func saveToRememberedFolder() {

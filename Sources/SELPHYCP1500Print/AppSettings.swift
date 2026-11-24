@@ -67,6 +67,16 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(blackPointCompensation, forKey: Keys.blackPointCompensation) }
     }
 
+    /// How the image is placed on the sheet when printing.
+    @Published var printFit: PrintFit {
+        didSet { defaults.set(printFit.rawValue, forKey: Keys.printFit) }
+    }
+
+    /// The notice shown before printing (Image Optimize...) can be silenced by the user.
+    @Published var hidePrintNotice: Bool {
+        didSet { defaults.set(hidePrintNotice, forKey: Keys.hidePrintNotice) }
+    }
+
     @Published var outputFormat: OutputFormat {
         didSet { defaults.set(outputFormat.rawValue, forKey: Keys.outputFormat) }
     }
@@ -104,6 +114,8 @@ final class AppSettings: ObservableObject {
         static let renderingIntent = "renderingIntent"
         static let blackPointCompensation = "blackPointCompensation"
         static let outputFormat = "outputFormat"
+        static let printFit = "printFit"
+        static let hidePrintNotice = "hidePrintNotice"
         static let profileBookmark = "profileBookmark"
         static let profileDisplayName = "profileDisplayName"
         static let saveFolderBookmark = "saveFolderBookmark"
@@ -119,6 +131,8 @@ final class AppSettings: ObservableObject {
         self.renderingIntent = RenderingIntent(rawValue: defaults.string(forKey: Keys.renderingIntent) ?? "") ?? .perceptual
         self.blackPointCompensation = defaults.object(forKey: Keys.blackPointCompensation) as? Bool ?? false
         self.outputFormat = OutputFormat(rawValue: defaults.string(forKey: Keys.outputFormat) ?? "") ?? .png
+        self.printFit = PrintFit(rawValue: defaults.string(forKey: Keys.printFit) ?? "") ?? .fit
+        self.hidePrintNotice = defaults.bool(forKey: Keys.hidePrintNotice)
         self.profileBookmark = defaults.data(forKey: Keys.profileBookmark)
         self.profileDisplayName = defaults.string(forKey: Keys.profileDisplayName) ?? ""
         self.saveFolderBookmark = defaults.data(forKey: Keys.saveFolderBookmark)

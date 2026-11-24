@@ -71,4 +71,17 @@ final class AppSettingsTests: XCTestCase {
             XCTAssertThrowsError(try ExportService.save(copies: [file], to: resolved))
         }
     }
+
+    func testPrintSettingsPersist() throws {
+        let (defaults, suite) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.printFit, .fit, "never crop by default")
+        XCTAssertFalse(settings.hidePrintNotice, "the notice is shown until the user silences it")
+        settings.printFit = .fill
+        settings.hidePrintNotice = true
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.printFit, .fill)
+        XCTAssertTrue(reloaded.hidePrintNotice)
+    }
 }
