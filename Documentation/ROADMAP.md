@@ -98,11 +98,11 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [ ] Later, lower priority: a*-b* plot of the printer gamut versus sRGB with the photo's colours.
 
 **M3.2 Application shell**
-- [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
+- [x] `.app` bundle: `scripts/make-app.sh`, `Packaging/` (Info.plist, sandbox entitlements incl. bookmarks.app-scope), ad-hoc signed in CI, signature/plist/entitlements verified, zip uploaded as artifact. Notarisation needs the owner's Developer ID (see `Documentation/RELEASE.md`); app icon still missing. Sandbox behaviour must be checked on a real Mac.
 - [x] Save the corrected copies to a user-chosen folder ("Salva in una cartella..."): `ExportService` only adds files (existing names get " 2", " 3"), never overwrites or deletes, removes only what the failed call itself created; temporary copies stay until the 24-hour cleanup; outputs are named `<name>_SELPHY.<ext>`; the settings used are shown. Tested (clash, repeat, partial failure, not a folder).
-- [ ] Remember the last save folder (security-scoped bookmark, with the sandbox entitlement); progress and cancellation; clear errors; show the profile report again after a restart.
+- [x] Remembered save folder (bookmark, "Salva in <cartella>" / "Salva in un'altra cartella..." / "Dimentica"; an unreachable folder asks again); progress (n/total) and "Annulla" (checked between photos, leaves no temporary folder, sources untouched); profile report shown again at launch. Tested: bookmark round trip, progress sequence, cancellation.
 - [x] Input scope: JPEG, JPEG XL, PNG, TIFF (HEIC not included).
-- [ ] UI language (Italian now; decide whether to localise).
+- [x] UI language: Italian only (decision); localisation can be added later.
 
 ### M4 - Print submission (no longer gated on physical prints)
 - [ ] Record the vendor's printer-setting instructions verbatim-in-substance in `Documentation/PRINT_SETTINGS.md` (owner to supply), and design the print route around them (sRGB pass-through, no second conversion, no printer-side enhancement).

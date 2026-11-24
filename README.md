@@ -53,6 +53,8 @@ The plan, milestones and evidence levels are maintained in [`Documentation/ROADM
 
 - Preview: a model-based soft proof shows the original, the expected print without correction and with correction (slider), computed from the printer profile's forward model and the display's ColorSync profile. It is a simulation, not a print proof, and has not been validated with physical prints.
 - Saving: the generated copies are temporary (removed after 24 hours); "Salva in una cartella..." copies them to a folder you choose. Files already there are never overwritten or deleted (a number is added to the name), and the source photos are never touched.
+- The save folder is remembered between launches. A running conversion shows progress and can be cancelled (no files are left behind).
+- App bundle: `scripts/make-app.sh` builds a sandboxed, ad-hoc signed `.app` (CI publishes it as an artifact); see `Documentation/RELEASE.md`.
 - The preview keeps its decoded and corrected data in memory, so changing a display option or going back to a photo is fast.
 - Source images are never modified.
 - The app does not embed the ICC profile: the user selects it at runtime. A copy is kept at the repository root for tests.
