@@ -66,6 +66,38 @@ final class WindowTests: XCTestCase {
         XCTAssertNil(Thumbnail.make(url: notAnImage, maxPixel: 132))
     }
 
+    func testScaledFallbackKeepsTheAspectRatioAndNeverEnlarges() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = try writeImage(named: "big.png", in: folder, width: 1200, height: 800)
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let full = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let small = try XCTUnwrap(Thumbnail.scaled(full, maxPixel: 120))
+        XCTAssertEqual(small.width, 120)
+        XCTAssertEqual(small.height, 80)
+        let same = try XCTUnwrap(Thumbnail.scaled(full, maxPixel: 5000))
+        XCTAssertEqual(same.width, 1200, "never enlarged")
+    }
+
+    func testThumbnailsOfJPEGFilesWithATaggedProfile() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = try writeImage(named: "photo.jpg", in: folder, type: .jpeg)
+        let thumbnail = try XCTUnwrap(Thumbnail.make(url: url, maxPixel: 132))
+        XCTAssertLessThanOrEqual(max(thumbnail.width, thumbnail.height), 132)
+    }
+
+    func testAccessIsHeldPerPhotoAndReleased() throws {
+        let access = PhotoAccess()
+        let a = URL(fileURLWithPath: "/tmp/a.jpg"), b = URL(fileURLWithPath: "/tmp/b.jpg")
+        access.retain(a); access.retain(a); access.retain(b)
+        XCTAssertEqual(access.count, 2, "retaining twice holds one access")
+        access.release(a)
+        XCTAssertEqual(access.count, 1)
+        access.releaseAll()
+        XCTAssertEqual(access.count, 0)
+    }
+
     // MARK: Icon
 
     func testAppIconIsInThePackagingFolderAndNamedInThePlist() throws {

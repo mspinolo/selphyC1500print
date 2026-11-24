@@ -132,7 +132,13 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [ ] Colour-deviation statistics for the loaded photos (beyond the current mean / 95th percentile / shares): dE00 histogram, median/max, shares above user-chosen thresholds, split by lightness zones (shadows, mid-tones, highlights); a summary table across all loaded photos to spot the problematic ones.
 - [ ] dE map with a user-adjustable scale (low and high dE for the colour ramp, with a legend) instead of the fixed 1 / 3 / 6.
 - [ ] "Too dark" overlay: highlight the pixels darker than the darkest tone the printer reproduces (merged or compressed shadows), with adjustable margin.
-- [ ] Candidates proposed to the owner (to be confirmed): out-of-gamut colour overlay; pixel inspector (original vs predicted Lab and dE under the cursor); 1:1 zoom and pan; Postcard crop guide (100 x 148 mm) showing what "Fill" would cut; automatic comparison of the three intents with a suggestion; exporting the analysis as CSV/PDF.
+- [ ] Out-of-gamut overlay: highlight the colours the printer cannot reach (saturated colours that are clipped or compressed), with adjustable sensitivity.
+- [ ] Pixel inspector: original colour, predicted print colour (Lab) and dE00 under the cursor.
+- [ ] 1:1 zoom and pan in the preview.
+- [ ] Postcard crop guide (100 x 148 mm): show on the preview what "Fill the paper" would cut, and the white margins of "Fit".
+- [ ] Automatic comparison of the three rendering intents per photo (mean/p95 dE, shadows, out-of-gamut share) with a suggestion of the best one and the reason.
+- [ ] Export of the analysis (statistics table, per photo) as CSV and PDF.
+- [x] Bug (owner, 2026-11-25): some thumbnails stayed on the placeholder icon. Cause not reproducible here (no Mac): hardened on three fronts: the sandbox access of every picked or dropped photo is now held while it is in the list (`PhotoAccess`), the thumbnail falls back to the embedded thumbnail and then to a full decode and scale, and a failure shows a warning icon instead of the placeholder. To be confirmed by the owner on the same photos.
 
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.

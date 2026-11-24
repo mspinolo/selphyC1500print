@@ -24,6 +24,7 @@ struct ContentView: View {
     @AppStorage("sidebarVisible") private var sidebarVisible = true
     @State private var selectedPhotos: [URL]
     @State private var previewPhoto: URL?
+    @State private var access = PhotoAccess()
     @State private var showingPhotoPicker = false
     @State private var generatedCopies: [URL] = []
     @StateObject private var printService = PrintService()
@@ -337,6 +338,7 @@ struct ContentView: View {
     private func addPhotos(_ urls: [URL]) -> Bool {
         let fresh = urls.filter { PhotoFiles.isSupported($0) && !selectedPhotos.contains($0) }
         guard !fresh.isEmpty else { return false }
+        fresh.forEach(access.retain)
         selectedPhotos.append(contentsOf: fresh)
         if previewPhoto == nil || !selectedPhotos.contains(previewPhoto!) { previewPhoto = selectedPhotos.first }
         statusMessage = trn(selectedPhotos.count, one: "1 photo queued.", other: "%d photos queued.")
@@ -346,12 +348,14 @@ struct ContentView: View {
 
     private func removePhoto(_ url: URL) {
         selectedPhotos.removeAll { $0 == url }
+        access.release(url)
         if previewPhoto == url { previewPhoto = selectedPhotos.first }
         resetGeneratedCopies()
     }
 
     private func clearPhotos() {
         selectedPhotos.removeAll()
+        access.releaseAll()
         previewPhoto = nil
         resetGeneratedCopies()
     }
