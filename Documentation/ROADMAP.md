@@ -109,9 +109,14 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [ ] Record the vendor's printer-setting instructions verbatim-in-substance in `Documentation/PRINT_SETTINGS.md` (owner to supply), and design the print route around them (sRGB pass-through, no second conversion, no printer-side enhancement).
 - [ ] Choose the route (system print dialog, AirPrint/IPP, or hand-off to the Canon app); sizing/fit/borders for 100 x 148 mm; job status, errors, cancellation; temp-file lifetime.
 - [ ] Ship behind an "experimental, vendor-trusted colour model" notice.
+- [ ] Route-equivalence check on the first print day (Track P): the same corrected chart printed through the app and through Preview/Canon's app must give indistinguishable sheets, otherwise the route alters colour.
 
-### M3.3 - Guided validation assistant (proposed, awaiting the owner's decision)
-- [ ] Wizard in the app built on `Documentation/PHYSICAL_VALIDATION.md`: what to print and how, ordered file export with blind codes, guided loading of the scans, analysis and report with the gates. Proposed to be built *after* the first real session, so that the procedure is frozen by experience and the Python tools serve as the reference implementation to cross-check against. Depends on: ColorChecker reference version (owner), the M4 print route.
+### M3.3 - Guided validation assistant (decided: for all users; deferred, to be built after M4 and the first real session)
+- [ ] Wizard in the app built on `Documentation/PHYSICAL_VALIDATION.md`: what to print and how, ordered file export with blind codes, guided loading of the scans, analysis and report with the gates. Built *after* the first real session so that the procedure is frozen by experience; the Python tools in `validation/` are the reference implementation the app's analysis is cross-checked against (same synthetic scans, same numbers). The analysis goes into the portable C core so it is tested on Linux too.
+- [ ] **Audience: all users** (owner decision, 2026-11-24), under an "Advanced" area, with a reduced scanner-less mode (visual side-by-side comparison of original/corrected prints).
+- [ ] **Selectable reference chart and version** (owner decision): the user picks which colour target they own (ColorChecker Classic 24, and further models such as Passport/Mini/SG or an IT8 as they are added) and which edition/production year; reference values live in data files, one per target/edition, plus import of the user's own values (CSV / CGATS). Bundle reference values only if their licence allows it; otherwise the user supplies them. The wizard must state which reference was used in every report.
+- [ ] Scanner side: accept the user's own scanner profile (embedded or separate) and explain the "profile applied twice or not at all" trap; the chain-error check on the target gates how far the results are trusted.
+- [ ] Depends on: the ColorChecker reference version (owner), the M4 print route.
 
 ### M5 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
