@@ -69,9 +69,20 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 **Exit:** the validation matrix in `VALIDATION_PLAN.md` is fully automated and green.
 
 ### M3 - Real application
+Order of work: M3.1 preview first (it is also the tool to judge the correction without printing), then the bundle, then the rest.
+
+**M3.1 Soft-proof preview (model-based)**
+- [ ] Core: `selphy_preview_create/apply` (printer profile used as an input device profile -> display profile, intent and BPC selectable, paper white normalised by default, optional paper-white simulation). Portable C, tested on Linux.
+- [ ] Core tests: (a) preview of the corrected values vs the original in dE00 on the chart (same tolerances as the end-to-end test); (b) preview of the uncorrected values equals the model baseline already measured (mean 9.25); (c) paper-white and black behaviour; (d) out-of-display-gamut clipping is reported, not silent.
+- [ ] Swift: three views (original / without correction / with correction) with a before/after slider; computed on a downscaled copy (fast), full-resolution only on export.
+- [ ] Display profile: ask ColorSync for the current display profile; fall back to sRGB. Needs a check on the owner's Mac (not verifiable in CI).
+- [ ] UI wording: "simulation from the printer profile, not a print proof; not validated with physical prints"; note that colours outside the monitor gamut are clipped in the preview.
+
+**M3.2 Application shell**
 - [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
-- [ ] Before/after preview; export to a user-chosen folder instead of a hidden temp folder; progress and cancellation; clear errors.
-- [x] Input scope: JPEG, JPEG XL, PNG, TIFF (HEIC not included). [ ] UI language.
+- [ ] Export to a user-chosen folder instead of a hidden temp folder; progress and cancellation; clear errors; show the profile report again after a restart.
+- [x] Input scope: JPEG, JPEG XL, PNG, TIFF (HEIC not included).
+- [ ] UI language (Italian now; decide whether to localise).
 
 ### M4 - Print submission (no longer gated on physical prints)
 - [ ] Record the vendor's printer-setting instructions verbatim-in-substance in `Documentation/PRINT_SETTINGS.md` (owner to supply), and design the print route around them (sRGB pass-through, no second conversion, no printer-side enhancement).
