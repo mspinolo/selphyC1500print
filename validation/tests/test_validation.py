@@ -201,7 +201,7 @@ class ReportTests(unittest.TestCase):
                 path = Path(tmp) / f"{variant}.tif"
                 simulate_scan.simulate(manifest, PROFILE, variant, str(path))
                 results[variant] = analyze_scan.analyse(path, manifest, variant)
-        results["V3"] = json.loads(json.dumps(results["V0"]))      # pretend CM ON is as bad as no correction
+        results["V3"] = json.loads(json.dumps(results["V0"]))      # pretend Image Optimize ON is as bad as no correction
         results["V3"]["label"] = "V3"
         text, gates = report.build_report(results, manifest, PROFILE)
         status = {name.split()[0]: ok for name, ok, _ in gates if name.startswith(("G1 ", "G2", "G3"))}

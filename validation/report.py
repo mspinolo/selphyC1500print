@@ -4,8 +4,8 @@
     python3 validation/report.py --results results --printer-icc ICC-Profile165-CP1500.icc \
         --manifest validation/charts/selphy_chart_v1.json --out results/REPORT.md
 
-Variants: V0 original/CM off, V1 corrected perceptual/CM off, V2 corrected relative colorimetric/
-CM off, V3 corrected perceptual/CM ON, V4 original/CM ON. Any subset can be reported.
+Variants (printer's Image Optimize setting in brackets): V0 original (OFF), V1 corrected perceptual (OFF),
+V2 corrected relative colorimetric (OFF), V3 corrected perceptual (ON), V4 original (ON). Any subset can be reported.
 """
 import argparse
 import json
@@ -18,11 +18,11 @@ import selphy_core
 import simulate_scan
 
 DESCRIPTIONS = {
-    "V0": "original, printer colour management OFF (baseline)",
-    "V1": "corrected, Perceptual, colour management OFF (main result)",
-    "V2": "corrected, Relative colorimetric, colour management OFF (intent choice)",
-    "V3": "corrected, Perceptual, colour management ON (double-conversion check)",
-    "V4": "original, colour management ON (control for V3)",
+    "V0": "original, printer Image Optimize OFF (baseline)",
+    "V1": "corrected, Perceptual, Image Optimize OFF (main result)",
+    "V2": "corrected, Relative colorimetric, Image Optimize OFF (intent choice)",
+    "V3": "corrected, Perceptual, Image Optimize ON (printer default; is it applied on this route?)",
+    "V4": "original, Image Optimize ON (control for V3)",
 }
 INDISTINGUISHABLE = 1.0          # dE00 differences below this are not interpreted as real
 
@@ -101,10 +101,10 @@ def build_report(results, manifest=None, printer_icc=None, scanner_check=None):
         c = v1["summary"]["neutral_chroma_p95"]
         gates.append(("G2 neutral axis (C* p95 <= 3 from L* 25 up) in V1", c is not None and c <= 3.0, f"C* p95 = {_fmt(c)}"))
     if v1 and v3:
-        gates.append(("G3 colour management ON is worse than OFF (double conversion exists)",
+        gates.append(("G3 Image Optimize ON is worse than OFF (the printer-side optimisation acts on this route)",
                       v3["summary"]["all"]["mean"] > v1["summary"]["all"]["mean"] + INDISTINGUISHABLE,
                       f"V3 mean {v3['summary']['all']['mean']:.2f} vs V1 {v1['summary']['all']['mean']:.2f}; "
-                      "if equal, the printer ignores the setting for this route"))
+                      "if V3 = V1 the setting has no visible effect on this route (see the procedure)"))
     for label in sorted(results):
         u = results[label]["summary"].get("uniformity_de00_max")
         if u is not None:

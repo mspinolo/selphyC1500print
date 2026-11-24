@@ -39,7 +39,7 @@ if __name__ == "__main__":
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["print_order_code", "variant", "content", "printer_colour_management"])
+        writer.writerow(["print_order_code", "variant", "content", "printer_image_optimize"])
         writer.writerows(rows)
     for row in rows:
         print(" | ".join(row))
