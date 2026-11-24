@@ -56,11 +56,15 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 
 ### M2 - Pipeline hardening
 - [x] 16-bit internal processing in the core (single final rounding); lossless PNG output as a precaution.
-- [ ] Measure the real JPEG penalty (encode the corrected chart as JPEG at several qualities and compare in DeltaE2000) before deciding whether JPEG output should return as an option. Note: an earlier suspicion that JPEG caused 5-11 DeltaE errors was wrong; the cause was a test bug (CoreGraphics bottom-left origin), fixed.
-- [x] 16-bit decode of the source (except EXIF-rotated images, which go through the 8-bit thumbnail API: open); alpha composited on white; input JPEG/JPEG XL/PNG/TIFF; output PNG (default) or JPEG (quality 0.98).
-- [ ] 16-bit decode for EXIF-rotated images; correct output resolution metadata.
-- [ ] Source handling: embedded Adobe RGB / Display P3 / untagged (explicit sRGB assumption surfaced in UI), grayscale and CMYK (convert or reject clearly), EXIF orientation 1-8, alpha, large images, memory bounds.
-- [ ] Tests for every case in the validation matrix, using small deterministic fixtures; fix the 3-byte packing loops (performance) or replace them.
+- [x] Real JPEG penalty measured (CI, macOS 27, 96x64 textured image with +-8 noise, dE00 through the printer's A2B, corrected PNG vs the same re-encoded as JPEG): quality 0.98 mean 0.66 / max 4.1; 0.90 mean 0.73 / max 4.4; 0.80 mean 0.84 / max 4.5. The mean is comparable to the colour residual of the correction itself, so PNG stays the default and JPEG stays an explicit, labelled option (quality 0.98). The earlier suspicion that JPEG caused 5-11 dE errors was wrong: it was a test bug (CoreGraphics bottom-left origin).
+- [x] 16-bit decode of the source for every input, including EXIF-rotated images (orientation applied while writing the converted pixels, no thumbnail API); alpha composited on white; input JPEG/JPEG XL/PNG/TIFF; output PNG (default) or JPEG (quality 0.98).
+- [x] EXIF orientations 1-8 verified pixel by pixel against the geometric definition (lossless TIFF fixtures).
+- [x] Output resolution: the source DPI is carried over (axes swapped for orientations 5-8); nothing is invented when the source has none.
+- [x] Source handling: embedded Adobe RGB honoured; grayscale, CMYK, Lab and indexed sources are converted to sRGB by Core Graphics and then corrected (reported in the UI); other colour models are rejected with a clear error. A JPEG without an ICC segment is treated as sRGB; note that ImageIO reports sRGB for such files, so they cannot be told from tagged sRGB and no "assumed" warning can be given for them.
+- [x] Memory bounds: 100 MP cap checked before any allocation (unit-tested); the 16-bit working buffer is released after conversion.
+- [x] Per-pixel packing loops replaced: rows are converted in blocks, in parallel (the transform is lock-free: no cache, no shared scratch), with unaligned 16-bit loads.
+- [x] CI records the macOS / Xcode / Swift versions.
+- [ ] Remaining validation-matrix gaps (see `VALIDATION_PLAN.md`): 16-bit and linear inputs (the unused ProPhoto 32-bit TIFF fixture needs a licence check before use), very large images (timing), Display P3 source.
 
 **Exit:** the validation matrix in `VALIDATION_PLAN.md` is fully automated and green.
 

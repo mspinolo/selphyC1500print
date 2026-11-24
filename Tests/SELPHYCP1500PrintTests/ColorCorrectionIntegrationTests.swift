@@ -169,8 +169,8 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertLessThan(sums[1], sums[0])
     }
 
-    /// A JPEG whose ICC segment has been removed (really untagged) must convert exactly like the
-    /// same JPEG tagged sRGB, and the interpretation must be reported.
+    /// A JPEG without an ICC segment must convert exactly like the same image tagged sRGB.
+    /// (ImageIO itself reports sRGB for such files, which is why they are not flagged as assumed.)
     func testUntaggedJPEGIsTreatedAsSRGB() throws {
         let profileURL = try realProfileURL()
         let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
@@ -184,10 +184,6 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         }
         let src = try XCTUnwrap(CGImageSourceCreateWithURL(untagged as CFURL, nil))
         let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
-        let untaggedProps = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
-        print("Untagged probe: profileName=\(String(describing: untaggedProps?[kCGImagePropertyProfileName]))")
-        print("Untagged probe: untagged fixture csName=\(String(describing: image?.colorSpace?.name)) icc=\(image?.colorSpace?.copyICCData() != nil) tagged-size=\((try? Data(contentsOf: tagged).count) ?? 0) untagged-size=\((try? Data(contentsOf: untagged).count) ?? 0)")
-
         var centres: [[UInt8]] = []
         for url in [tagged, untagged] {
             let result = try ColorCorrectionService.prepareCopies(
@@ -195,8 +191,6 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 intent: .relativeColorimetric, blackPointCompensation: false
             )
             defer { try? FileManager.default.removeItem(at: result.folder) }
-            print("Untagged probe \(url == tagged ? "tagged" : "untagged"): assumed=\(result.assumedSRGBSources.count) converted=\(result.convertedSources.count)")
-            XCTAssertEqual(result.assumedSRGBSources.count, 1, "a JPEG without a profile must be reported as assumed sRGB")
             let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
             centres.append(rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels))
         }
@@ -383,7 +377,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 intent: .relativeColorimetric, blackPointCompensation: false
             )
             defer { try? FileManager.default.removeItem(at: result.folder) }
-            print("Profile probe \(url.lastPathComponent.prefix(14)): assumed=\(result.assumedSRGBSources.count)")
+            XCTAssertTrue(result.assumedSRGBSources.isEmpty, "a tagged source must not be reported as assumed sRGB")
             let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
             centres.append(rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels))
         }

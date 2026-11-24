@@ -210,11 +210,11 @@ enum ColorCorrectionService {
         switch imageColorSpace.model {
         case .rgb where imageColorSpace.numberOfComponents == 3:
             embeddedICC = imageColorSpace.copyICCData() as Data?
-            // ImageIO reports an sRGB colour space even for files without any profile, so the
-            // colour space alone cannot tell "untagged" from "tagged sRGB". The profile name
-            // property is only present when the file actually carries a profile.
-            let carriesProfile = properties?[kCGImagePropertyProfileName] != nil
-            interpretation = (embeddedICC == nil || !carriesProfile) ? .assumedSRGB : .embeddedProfile
+            // ImageIO reports an sRGB colour space (and profile name) even for files that carry
+            // no profile at all, so a really untagged JPEG/PNG cannot be told from a tagged sRGB
+            // one: both are, correctly, treated as sRGB. "Assumed" is therefore reported only
+            // when no ICC data is available for an RGB colour space.
+            interpretation = embeddedICC == nil ? .assumedSRGB : .embeddedProfile
         case .monochrome, .cmyk, .lab, .indexed, .XYZ:
             interpretation = .convertedToSRGB
         default:
