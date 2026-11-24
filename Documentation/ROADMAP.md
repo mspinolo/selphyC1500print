@@ -80,6 +80,15 @@ Order of work: M3.1 preview first (it is also the tool to judge the correction w
 - [ ] Owner check on a real Mac (not verifiable in CI): the panel layout and the slider, the display profile of a wide-gamut screen (P3), responsiveness on a large photo.
 - [ ] Known limits: the preview normalises the original to sRGB (a wide-gamut source is shown clipped to sRGB in the "Original" view); gamut-clipping count is best effort for display profiles that clip in float.
 
+**M3.1b Colour details and per-photo checks (before the `.app` bundle)**
+Measured on the real profile, corrected neutral ramp (model, relative colorimetric, BPC off): neutral from source level 50/255 (L* ~21) upwards, residual chroma C* <= 0.9 and dE00 < 1; levels 0-30 all print as the printer black (L* 17.8) with a slight blue cast (a* 1.1, b* -4.0, C* ~4): shadow detail collapses. Perceptual keeps shadow separation but lifts tones by 3-7 L* and leaves C* up to 3.7. Relative + BPC not yet measured.
+- [ ] Core: per-image statistics from a preview-sized buffer: share of pixels not reproducible (dE00 > 3 between intended and predicted), share of pixels in collapsing shadows, mean and 95th percentile dE00, maximum residual chroma for near-neutral images (black-and-white detection). Linux tests with known inputs (neutral ramp, saturated primaries, mid grey) and mutation checks.
+- [ ] Core: per-pixel dE00 map (original vs predicted print) for a heat-map overlay.
+- [ ] Measure and record the shadow behaviour of relative + BPC versus perceptual (ramp, same method), and decide what the UI should recommend for black-and-white photos.
+- [ ] Swift/UI: collapsible "Colour details" panel (closed by default): colour space and meaning of the numbers of each of the three views, display profile in use, the per-photo checks above, black-and-white note; heat-map toggle.
+- [ ] Later, lower priority: a*-b* plot of the printer gamut versus sRGB with the photo's colours.
+- [ ] Wording: all of it is a model estimate, to be confirmed with a print.
+
 **M3.2 Application shell**
 - [ ] Proper `.app` bundle (Xcode project or build script), Info.plist, sandbox entitlements consistent with the security-scoped bookmarks, optional signing/notarisation, CI artifact.
 - [ ] Export to a user-chosen folder instead of a hidden temp folder; progress and cancellation; clear errors; show the profile report again after a restart.
