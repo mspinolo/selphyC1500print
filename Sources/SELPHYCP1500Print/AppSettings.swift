@@ -25,6 +25,34 @@ enum RenderingIntent: String, CaseIterable, Identifiable, Sendable, Hashable {
     }
 }
 
+enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Hashable {
+    case png
+    case jpeg
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .png: "PNG (senza perdita)"
+        case .jpeg: "JPEG (con perdita)"
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .png: "png"
+        case .jpeg: "jpg"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .png: "Consigliato: nessuna perdita dopo la correzione colore. File più grandi."
+        case .jpeg: "File più piccoli, ma la compressione con perdita viene applicata dopo la correzione colore."
+        }
+    }
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     @Published var selectedPrinterName: String {
@@ -37,6 +65,10 @@ final class AppSettings: ObservableObject {
 
     @Published var blackPointCompensation: Bool {
         didSet { defaults.set(blackPointCompensation, forKey: Keys.blackPointCompensation) }
+    }
+
+    @Published var outputFormat: OutputFormat {
+        didSet { defaults.set(outputFormat.rawValue, forKey: Keys.outputFormat) }
     }
 
     @Published private(set) var profileBookmark: Data? {
@@ -53,6 +85,7 @@ final class AppSettings: ObservableObject {
         static let printerName = "selectedPrinterName"
         static let renderingIntent = "renderingIntent"
         static let blackPointCompensation = "blackPointCompensation"
+        static let outputFormat = "outputFormat"
         static let profileBookmark = "profileBookmark"
         static let profileDisplayName = "profileDisplayName"
     }
@@ -62,6 +95,7 @@ final class AppSettings: ObservableObject {
         self.selectedPrinterName = defaults.string(forKey: Keys.printerName) ?? ""
         self.renderingIntent = RenderingIntent(rawValue: defaults.string(forKey: Keys.renderingIntent) ?? "") ?? .perceptual
         self.blackPointCompensation = defaults.object(forKey: Keys.blackPointCompensation) as? Bool ?? false
+        self.outputFormat = OutputFormat(rawValue: defaults.string(forKey: Keys.outputFormat) ?? "") ?? .png
         self.profileBookmark = defaults.data(forKey: Keys.profileBookmark)
         self.profileDisplayName = defaults.string(forKey: Keys.profileDisplayName) ?? ""
     }

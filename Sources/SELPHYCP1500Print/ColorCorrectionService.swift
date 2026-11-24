@@ -32,7 +32,7 @@ enum ColorCorrectionService {
             case .unreadableImage(let url):
                 return "Impossibile leggere l'immagine: \(url.lastPathComponent)"
             case .unsupportedColorSpace(let url):
-                return "Per questa prima versione è richiesto un JPEG RGB: \(url.lastPathComponent)"
+                return "Sono supportate solo immagini RGB (JPEG, JPEG XL, PNG, TIFF): \(url.lastPathComponent)"
             case .profileLoad(let detail):
                 return "Impossibile caricare il profilo ICC: \(detail)"
             case .transformCreation(let detail):
@@ -92,8 +92,8 @@ enum ColorCorrectionService {
 
         deinit { selphy_transform_free(handle) }
 
-        func apply(_ input: UnsafePointer<UInt8>, to output: UnsafeMutablePointer<UInt8>, pixelCount: Int) {
-            selphy_transform_apply_rgb8(handle, input, output, pixelCount)
+        func apply16(_ input: UnsafePointer<UInt16>, to output: UnsafeMutablePointer<UInt16>, pixelCount: Int) {
+            selphy_transform_apply_rgb16(handle, input, output, pixelCount)
         }
     }
 
@@ -101,7 +101,8 @@ enum ColorCorrectionService {
         from sourceURLs: [URL],
         printerProfileURL: URL,
         intent: RenderingIntent,
-        blackPointCompensation: Bool
+        blackPointCompensation: Bool,
+        outputFormat: OutputFormat = .png
     ) throws -> Result {
         let printerICC: Data
         do {
@@ -133,7 +134,7 @@ enum ColorCorrectionService {
                 let uniqueSuffix = String(UUID().uuidString.prefix(8))
                 let outputURL = sessionFolder
                     .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY-test-\(uniqueSuffix)")
-                    .appendingPathExtension("png")
+                    .appendingPathExtension(outputFormat.fileExtension)
 
                 try correct(
                     sourceURL: sourceURL,
@@ -141,6 +142,7 @@ enum ColorCorrectionService {
                     printerICC: printerICC,
                     intent: intent,
                     blackPointCompensation: blackPointCompensation,
+                    outputFormat: outputFormat,
                     transformCache: &transformCache
                 )
                 outputs.append(outputURL)
@@ -159,6 +161,7 @@ enum ColorCorrectionService {
         printerICC: Data,
         intent: RenderingIntent,
         blackPointCompensation: Bool,
+        outputFormat: OutputFormat,
         transformCache: inout [Data: ColorTransform]
     ) throws {
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
@@ -192,18 +195,19 @@ enum ColorCorrectionService {
 
         let width = image.width
         let height = image.height
-        // Bound allocations before multiplying dimensions. A single RGBX
-        // buffer is 4 bytes/pixel and the conversion temporarily holds both
-        // source and destination buffers.
+        // Bound allocations before multiplying dimensions. The source is decoded to
+        // 16 bits per component (8 bytes/pixel, RGBX) so that 16-bit and linear
+        // sources (PNG, TIFF) keep their precision; the result is 4 bytes/pixel.
         let maximumPixelCount = 100_000_000
         guard width > 0, height > 0,
-              width <= Int.max / 4,
-              height <= Int.max / (width * 4),
+              width <= Int.max / 8,
+              height <= Int.max / (width * 8),
               width <= maximumPixelCount / height else {
             throw CorrectionError.bitmapContext
         }
         let bytesPerRow = width * 4
-        let byteCount = bytesPerRow * height
+        let sourceBytesPerRow = width * 8
+        let byteCount = sourceBytesPerRow * height
 
         var sourcePixels = Data(count: byteCount)
         let sourceContextCreated = sourcePixels.withUnsafeMutableBytes { rawBuffer -> Bool in
@@ -211,20 +215,24 @@ enum ColorCorrectionService {
                 data: rawBuffer.baseAddress,
                 width: width,
                 height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow,
+                bitsPerComponent: 16,
+                bytesPerRow: sourceBytesPerRow,
                 space: sourceColorSpace,
-                bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)).rawValue
+                bitmapInfo: CGBitmapInfo.byteOrder16Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
             ) else {
                 return false
             }
             context.interpolationQuality = .high
+            // Transparent areas (PNG/TIFF with alpha) are composited on white, the
+            // sensible background for a print, instead of on black.
+            context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
         guard sourceContextCreated else { throw CorrectionError.bitmapContext }
 
-        let correctedPixels = try convertRGBXPixels(
+        let correctedPixels = try convertRGBX16Pixels(
             sourcePixels,
             width: width,
             height: height,
@@ -252,78 +260,91 @@ enum ColorCorrectionService {
             throw CorrectionError.bitmapContext
         }
 
+        let outputType: UTType = outputFormat == .png ? .png : .jpeg
         guard let destination = CGImageDestinationCreateWithURL(
             outputURL as CFURL,
-            UTType.png.identifier as CFString,
+            outputType.identifier as CFString,
             1,
             nil
         ) else {
             throw CorrectionError.imageEncoding(outputURL)
         }
 
-        // Lossless on purpose: a precision pre-correction should not be followed by a
-        // lossy codec. (The actual JPEG penalty has not been measured yet: ROADMAP M2.)
-        CGImageDestinationAddImage(destination, correctedImage, nil)
+        // PNG is the default because it is lossless: a precision pre-correction should not
+        // be followed by a lossy codec. JPEG is offered for smaller files; its real
+        // penalty has not been measured yet (ROADMAP M2).
+        let encodingOptions: CFDictionary? = outputFormat == .jpeg
+            ? [kCGImageDestinationLossyCompressionQuality: 0.98] as CFDictionary
+            : nil
+        CGImageDestinationAddImage(destination, correctedImage, encodingOptions)
         guard CGImageDestinationFinalize(destination) else {
             throw CorrectionError.imageEncoding(outputURL)
         }
     }
 
-    /// Applies the colour transform to a 32-bit big-endian RGBX Core Graphics
-    /// buffer (the fourth byte is padding), packing it to 24-bit RGB for the core.
-    /// Kept internal so tests can check the buffer handling without JPEG encoding.
-    static func convertRGBXPixels(
+    /// Applies the colour transform to a 16-bit big-endian RGBX Core Graphics buffer
+    /// (8 bytes/pixel, the fourth component is padding) and returns 8-bit RGBX
+    /// (4 bytes/pixel). Rows are converted one at a time to bound memory; the 16-bit
+    /// result is rounded to 8 bits once, at the end. Internal so tests can check the
+    /// buffer handling without image encoding.
+    static func convertRGBX16Pixels(
         _ sourcePixels: Data,
         width: Int,
         height: Int,
         transform: ColorTransform
     ) throws -> Data {
         guard width > 0, height > 0,
-              width <= Int.max / 4,
-              height <= Int.max / (width * 4),
-              sourcePixels.count == width * height * 4 else {
+              width <= Int.max / 8,
+              height <= Int.max / (width * 8),
+              sourcePixels.count == width * height * 8 else {
             throw CorrectionError.bitmapContext
         }
 
-        let pixelCount = width * height
-        var packedSource = [UInt8](repeating: 0, count: pixelCount * 3)
-        sourcePixels.withUnsafeBytes { raw in
-            let src = raw.bindMemory(to: UInt8.self)
-            packedSource.withUnsafeMutableBufferPointer { dst in
-                for pixel in 0..<pixelCount {
-                    dst[pixel * 3] = src[pixel * 4]
-                    dst[pixel * 3 + 1] = src[pixel * 4 + 1]
-                    dst[pixel * 3 + 2] = src[pixel * 4 + 2]
+        var output = Data(count: width * height * 4)
+        var rowIn = [UInt16](repeating: 0, count: width * 3)
+        var rowOut = [UInt16](repeating: 0, count: width * 3)
+        sourcePixels.withUnsafeBytes { sourceRaw in
+            let src = sourceRaw.bindMemory(to: UInt8.self)
+            output.withUnsafeMutableBytes { outputRaw in
+                let dst = outputRaw.bindMemory(to: UInt8.self)
+                for y in 0..<height {
+                    let sourceBase = y * width * 8
+                    for x in 0..<width {
+                        for channel in 0..<3 {
+                            let offset = sourceBase + x * 8 + channel * 2
+                            rowIn[x * 3 + channel] = (UInt16(src[offset]) << 8) | UInt16(src[offset + 1])
+                        }
+                    }
+                    rowIn.withUnsafeBufferPointer { input in
+                        rowOut.withUnsafeMutableBufferPointer { converted in
+                            transform.apply16(input.baseAddress!, to: converted.baseAddress!, pixelCount: width)
+                        }
+                    }
+                    let destinationBase = y * width * 4
+                    for x in 0..<width {
+                        for channel in 0..<3 {
+                            let value = UInt32(rowOut[x * 3 + channel])
+                            dst[destinationBase + x * 4 + channel] = UInt8((value * 255 + 32767) / 65535)
+                        }
+                        dst[destinationBase + x * 4 + 3] = 0
+                    }
                 }
             }
         }
-
-        var packedCorrected = [UInt8](repeating: 0, count: pixelCount * 3)
-        packedSource.withUnsafeBufferPointer { input in
-            packedCorrected.withUnsafeMutableBufferPointer { output in
-                transform.apply(input.baseAddress!, to: output.baseAddress!, pixelCount: pixelCount)
-            }
-        }
-
-        var correctedPixels = Data(count: sourcePixels.count)
-        correctedPixels.withUnsafeMutableBytes { raw in
-            let dst = raw.bindMemory(to: UInt8.self)
-            packedCorrected.withUnsafeBufferPointer { src in
-                for pixel in 0..<pixelCount {
-                    dst[pixel * 4] = src[pixel * 3]
-                    dst[pixel * 4 + 1] = src[pixel * 3 + 1]
-                    dst[pixel * 4 + 2] = src[pixel * 3 + 2]
-                    dst[pixel * 4 + 3] = 0
-                }
-            }
-        }
-        return correctedPixels
+        return output
     }
 
+    /// Decodes the first image. Without an EXIF/TIFF orientation the full-precision decode is
+    /// used (keeps 16-bit data). When a rotation or mirroring is needed the thumbnail API is
+    /// used to apply it, which yields 8-bit data (ROADMAP M2: 16-bit oriented decode).
     private static func makeOrientedImage(from source: CGImageSource) -> CGImage? {
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 1
         let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 1
+        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        if orientation == 1 {
+            return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
         return CGImageSourceCreateThumbnailAtIndex(
             source,
             0,

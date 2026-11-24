@@ -187,22 +187,36 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         selphy_delta_e2000(Array(a[patch * 3..<patch * 3 + 3]), Array(b[patch * 3..<patch * 3 + 3]))
     }
 
-    /// The Swift side only packs/unpacks buffers around the core. Verify the channel
-    /// order, the padding byte and the stride against a direct call to the core API.
+    /// The Swift side only repacks buffers around the core. Verify the byte order of the
+    /// 16-bit input, the channel order, the padding byte, the stride and the final rounding
+    /// against a direct call to the core API.
     func testBufferConversionMatchesDirectCoreCall() throws {
         let printerICC = try Data(contentsOf: try realProfileURL())
         let sourceURL = try makeColorChartJPEG()
         defer { try? FileManager.default.removeItem(at: sourceURL) }
         let source = try rgbaPixels(from: sourceURL)
+        let pixelCount = source.width * source.height
+
+        // 16-bit big-endian RGBX, 8 bytes/pixel, values expanded as v * 257.
+        var rgbx16 = [UInt8](repeating: 0xFF, count: pixelCount * 8)
+        var input16 = [UInt16](repeating: 0, count: pixelCount * 3)
+        for pixel in 0..<pixelCount {
+            for channel in 0..<3 {
+                let value = UInt16(source.pixels[pixel * 4 + channel]) * 257
+                rgbx16[pixel * 8 + channel * 2] = UInt8(value >> 8)
+                rgbx16[pixel * 8 + channel * 2 + 1] = UInt8(value & 0xFF)
+                input16[pixel * 3 + channel] = value
+            }
+        }
 
         let transform = try ColorCorrectionService.ColorTransform(
             sourceICC: nil, printerICC: printerICC,
             intent: .relativeColorimetric, blackPointCompensation: false
         )
-        let converted = try ColorCorrectionService.convertRGBXPixels(
-            Data(source.pixels), width: source.width, height: source.height, transform: transform
+        let converted = try ColorCorrectionService.convertRGBX16Pixels(
+            Data(rgbx16), width: source.width, height: source.height, transform: transform
         )
-        XCTAssertEqual(converted.count, source.pixels.count)
+        XCTAssertEqual(converted.count, pixelCount * 4)
 
         var options = selphy_options(intent: SELPHY_INTENT_RELATIVE_COLORIMETRIC, black_point_compensation: 0, exact: 0)
         var direct: OpaquePointer?
@@ -212,19 +226,16 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertTrue(status == SELPHY_OK)
         let handle = try XCTUnwrap(direct)
         defer { selphy_transform_free(handle) }
-
-        let pixelCount = source.width * source.height
-        var packed = [UInt8](repeating: 0, count: pixelCount * 3)
-        for pixel in 0..<pixelCount {
-            for channel in 0..<3 { packed[pixel * 3 + channel] = source.pixels[pixel * 4 + channel] }
-        }
-        var expected = [UInt8](repeating: 0, count: pixelCount * 3)
-        selphy_transform_apply_rgb8(handle, packed, &expected, pixelCount)
+        var output16 = [UInt16](repeating: 0, count: pixelCount * 3)
+        selphy_transform_apply_rgb16(handle, input16, &output16, pixelCount)
 
         let result = [UInt8](converted)
         var mismatches = 0
         for pixel in 0..<pixelCount {
-            for channel in 0..<3 where result[pixel * 4 + channel] != expected[pixel * 3 + channel] { mismatches += 1 }
+            for channel in 0..<3 {
+                let expected = UInt8((UInt32(output16[pixel * 3 + channel]) * 255 + 32767) / 65535)
+                if result[pixel * 4 + channel] != expected { mismatches += 1 }
+            }
             if result[pixel * 4 + 3] != 0 { mismatches += 1 }
         }
         XCTAssertEqual(mismatches, 0, "Swift buffer handling differs from the direct core call")
@@ -309,6 +320,104 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 XCTAssertEqual(transform.effectiveBlackPointCompensation, expected, "\(intent), requested BPC=\(requested)")
             }
         }
+    }
+
+    /// Both output formats must be produced, with the right container, size and sRGB tag.
+    func testBothOutputFormatsAreProduced() throws {
+        let profileURL = try realProfileURL()
+        let sourceURL = try makeRGBJPEG()
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        let expectedTypes: [OutputFormat: String] = [.png: "public.png", .jpeg: "public.jpeg"]
+        for format in OutputFormat.allCases {
+            let result = try ColorCorrectionService.prepareCopies(
+                from: [sourceURL], printerProfileURL: profileURL,
+                intent: .relativeColorimetric, blackPointCompensation: false,
+                outputFormat: format
+            )
+            defer { try? FileManager.default.removeItem(at: result.folder) }
+            let url = try XCTUnwrap(result.files.first)
+            XCTAssertEqual(url.pathExtension, format.fileExtension)
+            let imageSource = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+            XCTAssertEqual(CGImageSourceGetType(imageSource) as String?, expectedTypes[format])
+            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(imageSource, 0, nil))
+            XCTAssertEqual(image.width, 64)
+            XCTAssertEqual(image.height, 48)
+            XCTAssertEqual(image.colorSpace?.name, CGColorSpace.sRGB, "\(format)")
+        }
+    }
+
+    /// PNG and TIFF sources with identical pixels must convert identically; JPEG XL, when the
+    /// system can encode it, must at least be accepted with the right size.
+    func testPNGTIFFAndJPEGXLInputsAreAccepted() throws {
+        let profileURL = try realProfileURL()
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let pngURL = try makeSolidImageFile(type: .png, colorSpace: srgb, red: 0.55, green: 0.40, blue: 0.30)
+        let tiffURL = try makeSolidImageFile(type: .tiff, colorSpace: srgb, red: 0.55, green: 0.40, blue: 0.30)
+        defer {
+            try? FileManager.default.removeItem(at: pngURL)
+            try? FileManager.default.removeItem(at: tiffURL)
+        }
+        func centre(of url: URL) throws -> [UInt8] {
+            let result = try ColorCorrectionService.prepareCopies(
+                from: [url], printerProfileURL: profileURL,
+                intent: .relativeColorimetric, blackPointCompensation: false
+            )
+            defer { try? FileManager.default.removeItem(at: result.folder) }
+            let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
+            return rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels)
+        }
+        XCTAssertEqual(try centre(of: pngURL), try centre(of: tiffURL), "PNG and TIFF with equal pixels must convert identically")
+
+        if let jxl = UTType("public.jpeg-xl"),
+           (CGImageDestinationCopyTypeIdentifiers() as? [String])?.contains(jxl.identifier) == true {
+            let jxlURL = try makeSolidImageFile(type: jxl, colorSpace: srgb, red: 0.55, green: 0.40, blue: 0.30)
+            defer { try? FileManager.default.removeItem(at: jxlURL) }
+            let lossyCentre = try centre(of: jxlURL)
+            let largestDifference = zip(lossyCentre, try centre(of: pngURL)).map { abs(Int($0) - Int($1)) }.max() ?? 0
+            XCTAssertLessThanOrEqual(largestDifference, 3, "JPEG XL flat patch should convert like the lossless source")
+        } else {
+            print("JPEG XL encoding not available on this system; JXL input not exercised")
+        }
+    }
+
+    /// Transparent areas are composited on white (the paper), not on black.
+    func testTransparentPNGIsCompositedOnWhite() throws {
+        let profileURL = try realProfileURL()
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let url = try makeSolidImageFile(type: .png, colorSpace: srgb, red: 0, green: 0, blue: 0, alpha: 0)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [url], printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+        let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
+        let centre = rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels)
+        // White maps to the printer's paper white, which is near 255 in every channel.
+        XCTAssertGreaterThanOrEqual(centre.min() ?? 0, 245, "transparent pixels must become white, got \(centre)")
+    }
+
+    private func makeSolidImageFile(
+        type: UTType, colorSpace: CGColorSpace,
+        red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat = 1
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selphy-solid-\(UUID().uuidString)")
+            .appendingPathExtension(type.preferredFilenameExtension ?? "img")
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.clear(CGRect(x: 0, y: 0, width: 32, height: 32))
+        if alpha > 0 {
+            context.setFillColor(CGColor(colorSpace: colorSpace, components: [red, green, blue, alpha])!)
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination), "cannot write \(type.identifier)")
+        return url
     }
 
     private func makeSolidJPEG(colorSpace: CGColorSpace, red: CGFloat, green: CGFloat, blue: CGFloat) throws -> URL {

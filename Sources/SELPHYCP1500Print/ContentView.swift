@@ -12,7 +12,7 @@ struct ContentView: View {
     @State private var generatedCopies: [URL] = []
     @State private var generatedFolder: URL?
     @State private var isPreparing = false
-    @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie JPEG."
+    @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie (JPEG, JPEG XL, PNG, TIFF)."
 
     /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile. The
     /// version is known once a profile has been inspected; the Farbenwerk profile is v4.
@@ -20,6 +20,10 @@ struct ContentView: View {
         let major = profileReport.flatMap { Int($0.version.prefix(1)) } ?? 4
         return settings.renderingIntent != .relativeColorimetric && major >= 4
     }
+
+    /// JPEG XL needs a recent ImageIO (macOS 14+); it is skipped if the type is unknown.
+    private static let supportedImageTypes: [UTType] =
+        [.jpeg, .png, .tiff] + [UTType("public.jpeg-xl")].compactMap { $0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -78,6 +82,14 @@ struct ContentView: View {
                             Text(intent.title).tag(intent)
                         }
                     }
+                    Picker("Formato dei file generati", selection: $settings.outputFormat) {
+                        ForEach(OutputFormat.allCases) { format in
+                            Text(format.title).tag(format)
+                        }
+                    }
+                    Text(settings.outputFormat.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Toggle(
                         "Compensazione del punto nero (BPC)",
                         isOn: blackPointCompensationForced ? .constant(true) : $settings.blackPointCompensation
@@ -88,7 +100,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("La conversione usa il motore colore integrato (LittleCMS). In questa fase è una pre-correzione sperimentale: l'immagine risultante (PNG senza perdita) viene etichettata sRGB per il successivo trattamento interno della SELPHY.")
+                    Text("La conversione usa il motore colore integrato (LittleCMS). In questa fase è una pre-correzione sperimentale: l'immagine risultante viene etichettata sRGB per il successivo trattamento interno della SELPHY.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -99,7 +111,7 @@ struct ContentView: View {
                 HStack {
                     Text(selectedPhotos.isEmpty ? "Nessuna fotografia selezionata" : "\(selectedPhotos.count) fotografie selezionate")
                     Spacer()
-                    Button("Aggiungi JPEG…") { showingPhotoPicker = true }
+                    Button("Aggiungi immagini…") { showingPhotoPicker = true }
                     Button("Svuota", role: .destructive) {
                         selectedPhotos.removeAll()
                         generatedCopies.removeAll()
@@ -114,7 +126,7 @@ struct ContentView: View {
                     }
                     .frame(minHeight: 90, maxHeight: 150)
                 }
-                Text("Gli originali vengono soltanto letti. La conversione crea nuove immagini PNG temporanee.")
+                Text("Gli originali vengono soltanto letti. La conversione crea nuove immagini temporanee.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -170,7 +182,7 @@ struct ContentView: View {
         .padding(24)
         .fileImporter(
             isPresented: $showingPhotoPicker,
-            allowedContentTypes: [.jpeg],
+            allowedContentTypes: Self.supportedImageTypes,
             allowsMultipleSelection: true,
             onCompletion: handlePhotoSelection
         )
@@ -228,6 +240,7 @@ struct ContentView: View {
             let photoURLs = selectedPhotos
             let intent = settings.renderingIntent
             let bpc = settings.blackPointCompensation
+            let format = settings.outputFormat
             isPreparing = true
             statusMessage = "Conversione colore in corso…"
 
@@ -245,7 +258,8 @@ struct ContentView: View {
                             from: photoURLs,
                             printerProfileURL: profileURL,
                             intent: intent,
-                            blackPointCompensation: bpc
+                            blackPointCompensation: bpc,
+                            outputFormat: format
                         )
                     }.value
 
