@@ -1,6 +1,7 @@
 #include "selphy_color_core.h"
 #include "lcms2.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -370,4 +371,139 @@ void selphy_preview_free(selphy_preview *preview) {
     cmsDeleteTransform(preview->transform_float);
     cmsDeleteContext(preview->context);
     free(preview);
+}
+
+
+/* ---- Per-photo checks ----------------------------------------------------------------- */
+
+enum { SELPHY_HIST_BINS = 4000 };
+
+static cmsHTRANSFORM to_lab_transform(cmsContext ctx, cmsHPROFILE profile, cmsUInt32Number intent) {
+    cmsHPROFILE lab = cmsCreateLab2ProfileTHR(ctx, NULL);
+    if (lab == NULL) return NULL;
+    cmsHPROFILE profiles[2] = { profile, lab };
+    cmsBool bpcs[2] = { FALSE, FALSE };
+    cmsUInt32Number intents[2] = { intent, intent };
+    cmsFloat64Number adaptation[2] = { 1.0, 1.0 };
+    cmsHTRANSFORM t = cmsCreateExtendedTransform(
+        ctx, 2, profiles, bpcs, intents, adaptation, NULL, 0,
+        TYPE_RGB_16, TYPE_Lab_DBL, cmsFLAGS_NOCACHE | cmsFLAGS_HIGHRESPRECALC);
+    cmsCloseProfile(lab);
+    return t;
+}
+
+/* Value at the given quantile of a histogram with `bins` bins of width `width` (upper bin edge). */
+static double hist_quantile(const size_t *hist, int bins, double width, size_t total, double q) {
+    if (total == 0) return 0.0;
+    size_t target = (size_t)ceil(q * (double)total);
+    if (target < 1) target = 1;
+    size_t cumulative = 0;
+    for (int i = 0; i < bins; i++) {
+        cumulative += hist[i];
+        if (cumulative >= target) return (i + 1) * width;
+    }
+    return bins * width;
+}
+
+selphy_status selphy_analyze_photo(
+    const uint8_t *printer_icc, size_t printer_icc_size,
+    const uint8_t *srgb_rgb8, const uint8_t *device_rgb8, size_t pixel_count,
+    const uint8_t corrected_black_rgb8[3],
+    float *de_map, selphy_photo_stats *out_stats) {
+    if (out_stats == NULL) return SELPHY_ERR_ARGUMENT;
+    memset(out_stats, 0, sizeof(*out_stats));
+    out_stats->neutral_p95_chroma = -1.0;
+    if (srgb_rgb8 == NULL || device_rgb8 == NULL || corrected_black_rgb8 == NULL || pixel_count == 0) return SELPHY_ERR_ARGUMENT;
+
+    cmsContext ctx = cmsCreateContext(NULL, NULL);
+    if (ctx == NULL) return SELPHY_ERR_MEMORY;
+    cmsHPROFILE printer = NULL, srgb = NULL;
+    selphy_status status = open_printer(ctx, printer_icc, printer_icc_size, SELPHY_INTENT_RELATIVE_COLORIMETRIC, &printer);
+    if (status == SELPHY_OK) status = open_source(ctx, NULL, 0, &srgb);
+    cmsHTRANSFORM intended_t = NULL, predicted_t = NULL;
+    size_t *de_hist = NULL, *chroma_hist = NULL;
+    if (status == SELPHY_OK) {
+        intended_t = to_lab_transform(ctx, srgb, INTENT_RELATIVE_COLORIMETRIC);
+        predicted_t = to_lab_transform(ctx, printer, INTENT_RELATIVE_COLORIMETRIC);
+        de_hist = (size_t *)calloc(SELPHY_HIST_BINS, sizeof(size_t));
+        chroma_hist = (size_t *)calloc(SELPHY_HIST_BINS, sizeof(size_t));
+        if (intended_t == NULL || predicted_t == NULL) status = SELPHY_ERR_TRANSFORM;
+        else if (de_hist == NULL || chroma_hist == NULL) status = SELPHY_ERR_MEMORY;
+    }
+    if (srgb) cmsCloseProfile(srgb);
+    if (status != SELPHY_OK) {
+        if (printer) cmsCloseProfile(printer);
+        if (intended_t) cmsDeleteTransform(intended_t);
+        if (predicted_t) cmsDeleteTransform(predicted_t);
+        free(de_hist);
+        free(chroma_hist);
+        cmsDeleteContext(ctx);
+        return status;
+    }
+
+    /* The darkest tone the print reproduces: the predicted lightness of the corrected source black. */
+    uint16_t black16[3] = { (uint16_t)(corrected_black_rgb8[0] * 257u), (uint16_t)(corrected_black_rgb8[1] * 257u),
+                            (uint16_t)(corrected_black_rgb8[2] * 257u) };
+    double black_lab[3];
+    cmsDoTransform(predicted_t, black16, black_lab, 1);
+    const double black_l = black_lab[0];
+    out_stats->darkest_tone_l = black_l;
+
+    enum { CHUNK = 2048 };
+    uint16_t in_s[CHUNK * 3], in_d[CHUNK * 3];
+    double lab_s[CHUNK * 3], lab_d[CHUNK * 3];
+    size_t done = 0, not_reproducible = 0, below_black = 0, neutral = 0, neutral_reproducible = 0;
+    double sum_de = 0.0, max_de = 0.0;
+    const double de_bin = 100.0 / SELPHY_HIST_BINS;     /* dE00 up to 100 */
+    const double chroma_bin = 200.0 / SELPHY_HIST_BINS; /* C* up to 200 */
+    while (done < pixel_count) {
+        size_t n = pixel_count - done;
+        if (n > CHUNK) n = CHUNK;
+        for (size_t i = 0; i < n * 3; i++) {
+            in_s[i] = (uint16_t)(srgb_rgb8[done * 3 + i] * 257u);
+            in_d[i] = (uint16_t)(device_rgb8[done * 3 + i] * 257u);
+        }
+        cmsDoTransform(intended_t, in_s, lab_s, (cmsUInt32Number)n);
+        cmsDoTransform(predicted_t, in_d, lab_d, (cmsUInt32Number)n);
+        for (size_t p = 0; p < n; p++) {
+            const double *a = lab_s + p * 3, *b = lab_d + p * 3;
+            double de = selphy_delta_e2000(a, b);
+            sum_de += de;
+            if (de > max_de) max_de = de;
+            if (de > SELPHY_DE_NOT_REPRODUCIBLE) not_reproducible++;
+            int bin = (int)(de / de_bin);
+            de_hist[bin >= SELPHY_HIST_BINS ? SELPHY_HIST_BINS - 1 : bin]++;
+            if (a[0] < black_l) below_black++;
+            if (hypot(a[1], a[2]) < SELPHY_NEUTRAL_CHROMA) {
+                neutral++;
+                if (a[0] >= black_l + 3.0) {
+                    neutral_reproducible++;
+                    int cb = (int)(hypot(b[1], b[2]) / chroma_bin);
+                    chroma_hist[cb >= SELPHY_HIST_BINS ? SELPHY_HIST_BINS - 1 : cb]++;
+                }
+            }
+            if (de_map != NULL) de_map[done + p] = (float)de;
+        }
+        done += n;
+    }
+
+    double total = (double)pixel_count;
+    out_stats->mean_de = sum_de / total;
+    out_stats->max_de = max_de;
+    out_stats->p95_de = hist_quantile(de_hist, SELPHY_HIST_BINS, de_bin, pixel_count, 0.95);
+    if (out_stats->p95_de > max_de) out_stats->p95_de = max_de;
+    out_stats->share_not_reproducible = (double)not_reproducible / total;
+    out_stats->share_below_darkest_tone = (double)below_black / total;
+    out_stats->neutral_share = (double)neutral / total;
+    if (neutral_reproducible > 0) {
+        out_stats->neutral_p95_chroma = hist_quantile(chroma_hist, SELPHY_HIST_BINS, chroma_bin, neutral_reproducible, 0.95);
+    }
+
+    free(de_hist);
+    free(chroma_hist);
+    cmsDeleteTransform(intended_t);
+    cmsDeleteTransform(predicted_t);
+    cmsCloseProfile(printer);
+    cmsDeleteContext(ctx);
+    return SELPHY_OK;
 }

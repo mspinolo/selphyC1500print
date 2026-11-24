@@ -119,6 +119,38 @@ selphy_status selphy_source_to_lab(
 /* CIEDE2000 between two Lab triples. */
 double selphy_delta_e2000(const double lab1[3], const double lab2[3]);
 
+/*
+ * Per-photo checks. Compares, pixel by pixel, the appearance the photo should have (its sRGB
+ * numbers read as sRGB, relative colorimetric, no BPC) with the appearance the printer is
+ * predicted to produce for the corrected device values (printer A2B, relative colorimetric).
+ * It is a model estimate, not a measurement of a print. With perceptual rendering or BPC the
+ * differences include the intended tone compression.
+ */
+#define SELPHY_DE_NOT_REPRODUCIBLE 3.0   /* dE00 above which a pixel counts as not reproduced */
+#define SELPHY_NEUTRAL_CHROMA 3.0        /* intended C* below which a pixel counts as neutral */
+#define SELPHY_NEUTRAL_IMAGE_SHARE 0.9   /* neutral pixel share from which a photo counts as black and white */
+
+typedef struct {
+    double mean_de, p95_de, max_de;      /* dE00 between intended and predicted appearance */
+    double share_not_reproducible;       /* share of pixels with dE00 > SELPHY_DE_NOT_REPRODUCIBLE */
+    double darkest_tone_l;               /* predicted L* of the corrected source black: the darkest tone the print reproduces */
+    double share_below_darkest_tone;     /* share of pixels whose intended L* is below that (merged or compressed shadows) */
+    double neutral_share;                /* share of pixels with intended C* < SELPHY_NEUTRAL_CHROMA */
+    double neutral_p95_chroma;           /* predicted C*, 95th percentile over neutral pixels that are
+                                            at least 3 L* above the darkest tone; -1 if there are none */
+} selphy_photo_stats;
+
+/* srgb_rgb8 and device_rgb8: packed R,G,B, pixel_count pixels each, same pixel order.
+   corrected_black_rgb8: the device values the same correction produces for source black (0,0,0);
+   its predicted lightness is the darkest tone the print can reproduce (the device black itself is
+   darker but strongly tinted, and the correction does not use it).
+   de_map (optional, may be NULL) receives dE00 per pixel. */
+selphy_status selphy_analyze_photo(
+    const uint8_t *printer_icc, size_t printer_icc_size,
+    const uint8_t *srgb_rgb8, const uint8_t *device_rgb8, size_t pixel_count,
+    const uint8_t corrected_black_rgb8[3],
+    float *de_map, selphy_photo_stats *out_stats);
+
 const char *selphy_status_message(selphy_status status);
 
 /* Encoded version of the linked LittleCMS (e.g. 2200 for 2.20). */

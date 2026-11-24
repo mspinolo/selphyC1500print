@@ -522,6 +522,129 @@ static void test_preview_gamut_report_and_chunking(const uint8_t *prn, size_t pr
     selphy_preview_free(p);
 }
 
+
+/* ---- Per-photo checks ----------------------------------------------------------------- */
+
+static void correct8(const uint8_t *prn, size_t prn_n, const uint8_t *src, uint8_t *dst, size_t n) {
+    selphy_transform *t = make(NULL, 0, prn, prn_n, SELPHY_INTENT_RELATIVE_COLORIMETRIC, 0, 0);
+    if (t) { selphy_transform_apply_rgb8(t, src, dst, n); selphy_transform_free(t); }
+}
+
+static void corrected_black(const uint8_t *prn, size_t prn_n, uint8_t out[3]) {
+    const uint8_t black[3] = {0, 0, 0};
+    correct8(prn, prn_n, black, out, 1);
+}
+
+static void test_analysis_error_paths(const uint8_t *prn, size_t prn_n) {
+    uint8_t px[3] = {10, 20, 30}, kb[3] = {30, 20, 0};
+    selphy_photo_stats st;
+    CHECK(selphy_analyze_photo(prn, prn_n, px, px, 1, kb, NULL, NULL) == SELPHY_ERR_ARGUMENT, "NULL stats");
+    CHECK(selphy_analyze_photo(prn, prn_n, NULL, px, 1, kb, NULL, &st) == SELPHY_ERR_ARGUMENT, "NULL source");
+    CHECK(selphy_analyze_photo(prn, prn_n, px, NULL, 1, kb, NULL, &st) == SELPHY_ERR_ARGUMENT, "NULL device");
+    CHECK(selphy_analyze_photo(prn, prn_n, px, px, 0, kb, NULL, &st) == SELPHY_ERR_ARGUMENT, "no pixels");
+    CHECK(selphy_analyze_photo(prn, prn_n, px, px, 1, NULL, NULL, &st) == SELPHY_ERR_ARGUMENT, "NULL black");
+    CHECK(selphy_analyze_photo(prn, prn_n / 2, px, px, 1, kb, NULL, &st) == SELPHY_ERR_PRINTER_PROFILE, "truncated printer");
+    CHECK(selphy_analyze_photo(NULL, 0, px, px, 1, kb, NULL, &st) == SELPHY_ERR_ARGUMENT, "NULL printer");
+}
+
+/* White and light neutral: nothing to report. */
+static void test_analysis_white_and_midgrey(const uint8_t *prn, size_t prn_n) {
+    enum { N = 64 };
+    uint8_t src[N * 3], dev[N * 3];
+    for (int i = 0; i < N; i++) src[i * 3] = src[i * 3 + 1] = src[i * 3 + 2] = (i % 2) ? 255 : 128;
+    correct8(prn, prn_n, src, dev, N);
+    selphy_photo_stats st;
+    uint8_t kb[3];
+    corrected_black(prn, prn_n, kb);
+    CHECK(selphy_analyze_photo(prn, prn_n, src, dev, N, kb, NULL, &st) == SELPHY_OK, "analyze");
+    printf("analysis white+grey: mean=%.3f p95=%.3f max=%.3f darkest L=%.2f neutral=%.2f chroma95=%.2f\n",
+           st.mean_de, st.p95_de, st.max_de, st.darkest_tone_l, st.neutral_share, st.neutral_p95_chroma);
+    CHECK(st.mean_de < 0.5 && st.max_de < 1.0, "white and mid grey are reproduced (mean %.3f max %.3f)", st.mean_de, st.max_de);
+    CHECK(st.share_not_reproducible == 0.0, "nothing is unreproducible");
+    CHECK(st.share_below_darkest_tone == 0.0, "nothing is below the darkest tone");
+    CHECK(st.neutral_share == 1.0, "all pixels neutral");
+    CHECK(st.neutral_p95_chroma >= 0.0 && st.neutral_p95_chroma <= 1.0, "residual chroma small (%.2f)", st.neutral_p95_chroma);
+    CHECK(st.darkest_tone_l > 15.0 && st.darkest_tone_l < 20.0, "darkest reproducible tone L* about 18 (%.2f)", st.darkest_tone_l);
+}
+
+/* Full neutral ramp: shadow share checked against an independent computation. */
+static void test_analysis_neutral_ramp(const uint8_t *prn, size_t prn_n) {
+    uint8_t src[256 * 3], dev[256 * 3];
+    for (int i = 0; i < 256; i++) src[i * 3] = src[i * 3 + 1] = src[i * 3 + 2] = (uint8_t)i;
+    correct8(prn, prn_n, src, dev, 256);
+    uint8_t kb[3] = {dev[0], dev[1], dev[2]};   /* the corrected source black is ramp level 0 */
+    selphy_photo_stats st;
+    CHECK(selphy_analyze_photo(prn, prn_n, src, dev, 256, kb, NULL, &st) == SELPHY_OK, "analyze");
+
+    uint16_t kb16[3] = {(uint16_t)(kb[0] * 257), (uint16_t)(kb[1] * 257), (uint16_t)(kb[2] * 257)}, s16[256 * 3];
+    for (int i = 0; i < 256 * 3; i++) s16[i] = (uint16_t)(src[i] * 257);
+    double black[3], lab[256 * 3];
+    CHECK(selphy_printer_predict_lab(prn, prn_n, SELPHY_INTENT_RELATIVE_COLORIMETRIC, kb16, black, 1) == SELPHY_OK, "black");
+    CHECK(selphy_source_to_lab(NULL, 0, s16, lab, 256) == SELPHY_OK, "lab");
+    int below = 0;
+    for (int i = 0; i < 256; i++) if (lab[i * 3] < black[0]) below++;
+    printf("analysis ramp: darkest tone L*=%.2f, levels below = %d/256, stats say %.4f; not reproducible %.3f; chroma95 %.2f; mean %.2f p95 %.2f\n",
+           st.darkest_tone_l, below, st.share_below_darkest_tone, st.share_not_reproducible, st.neutral_p95_chroma, st.mean_de, st.p95_de);
+    CHECK(fabs(st.darkest_tone_l - black[0]) < 0.05, "darkest tone matches the A2B of the corrected black");
+    CHECK(fabs(st.share_below_darkest_tone - below / 256.0) < 1e-9, "shadow share differs from the independent count");
+    CHECK(below >= 30 && below <= 60, "about the darkest 40 levels are below the darkest tone (%d)", below);
+    CHECK(st.neutral_share == 1.0, "ramp is neutral");
+    CHECK(st.neutral_p95_chroma >= 0.0 && st.neutral_p95_chroma <= 1.2, "reproducible neutrals stay neutral (C* %.2f)", st.neutral_p95_chroma);
+    CHECK(st.share_not_reproducible >= st.share_below_darkest_tone * 0.5 && st.share_not_reproducible <= 0.30,
+          "unreproducible share plausible (%.3f)", st.share_not_reproducible);
+    CHECK(st.p95_de >= st.mean_de && st.max_de >= st.p95_de - 0.05, "ordering mean <= p95 <= max");
+
+    /* Chroma is measured on the predicted print, not on the original: sent uncorrected, the
+       same neutral ramp must show a clearly larger residual tint. */
+    selphy_photo_stats raw;
+    CHECK(selphy_analyze_photo(prn, prn_n, src, src, 256, kb, NULL, &raw) == SELPHY_OK, "analyze uncorrected ramp");
+    printf("analysis ramp uncorrected: chroma95 %.2f (corrected %.2f)\n", raw.neutral_p95_chroma, st.neutral_p95_chroma);
+    CHECK(raw.neutral_p95_chroma > 2.0 && raw.neutral_p95_chroma > 2.0 * st.neutral_p95_chroma,
+          "uncorrected neutrals show a tint (C* %.2f)", raw.neutral_p95_chroma);
+}
+
+static void test_analysis_primaries_and_map(const uint8_t *prn, size_t prn_n) {
+    /* Saturated primaries are outside the printer gamut. */
+    uint8_t src[3 * 3] = {255, 0, 0, 0, 255, 0, 0, 0, 255}, dev[9];
+    correct8(prn, prn_n, src, dev, 3);
+    selphy_photo_stats st;
+    uint8_t kb[3];
+    corrected_black(prn, prn_n, kb);
+    CHECK(selphy_analyze_photo(prn, prn_n, src, dev, 3, kb, NULL, &st) == SELPHY_OK, "analyze");
+    printf("analysis primaries: not reproducible=%.2f mean=%.2f max=%.2f\n", st.share_not_reproducible, st.mean_de, st.max_de);
+    CHECK(st.share_not_reproducible == 1.0 && st.mean_de > 5.0, "pure primaries are not reproducible");
+    CHECK(st.neutral_share == 0.0 && st.neutral_p95_chroma == -1.0, "no neutral pixels in primaries");
+
+    /* Per-pixel map against the independent per-patch computation on the chart. */
+    uint16_t c16[CHART_COUNT * 3];
+    uint8_t c8[CHART_COUNT * 3], d8[CHART_COUNT * 3];
+    float map[CHART_COUNT];
+    make_chart16(c16);
+    for (int i = 0; i < CHART_COUNT * 3; i++) c8[i] = (uint8_t)(c16[i] / 257);
+    correct8(prn, prn_n, c8, d8, CHART_COUNT);
+    CHECK(selphy_analyze_photo(prn, prn_n, c8, d8, CHART_COUNT, kb, map, &st) == SELPHY_OK, "analyze chart");
+    uint16_t d16[CHART_COUNT * 3];
+    for (int i = 0; i < CHART_COUNT * 3; i++) d16[i] = (uint16_t)(d8[i] * 257);
+    double intended[CHART_COUNT * 3], predicted[CHART_COUNT * 3], sum = 0.0;
+    CHECK(selphy_source_to_lab(NULL, 0, c16, intended, CHART_COUNT) == SELPHY_OK, "intended");
+    CHECK(selphy_printer_predict_lab(prn, prn_n, SELPHY_INTENT_RELATIVE_COLORIMETRIC, d16, predicted, CHART_COUNT) == SELPHY_OK, "predicted");
+    double worst = 0.0;
+    for (int i = 0; i < CHART_COUNT; i++) {
+        double de = selphy_delta_e2000(intended + i * 3, predicted + i * 3);
+        sum += de;
+        if (fabs(de - map[i]) > worst) worst = fabs(de - map[i]);
+    }
+    printf("analysis chart: mean=%.3f (independent %.3f), map deviation %.4f\n", st.mean_de, sum / CHART_COUNT, worst);
+    CHECK(worst < 0.05, "dE map differs from the independent computation by %.4f", worst);
+    CHECK(fabs(st.mean_de - sum / CHART_COUNT) < 0.05, "mean dE differs from the independent computation");
+
+    /* The same photo sent uncorrected is clearly worse. */
+    selphy_photo_stats raw;
+    CHECK(selphy_analyze_photo(prn, prn_n, c8, c8, CHART_COUNT, kb, NULL, &raw) == SELPHY_OK, "analyze uncorrected");
+    printf("analysis chart uncorrected: mean=%.2f vs corrected %.2f\n", raw.mean_de, st.mean_de);
+    CHECK(raw.mean_de > 2.0 * st.mean_de, "uncorrected must be at least twice as far from the original");
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <printer-profile.icc>\n", argv[0]);
@@ -548,6 +671,10 @@ int main(int argc, char **argv) {
     test_preview_closed_loop(prn, prn_n);
     test_preview_white_and_black(prn, prn_n);
     test_preview_gamut_report_and_chunking(prn, prn_n);
+    test_analysis_error_paths(prn, prn_n);
+    test_analysis_white_and_midgrey(prn, prn_n);
+    test_analysis_neutral_ramp(prn, prn_n);
+    test_analysis_primaries_and_map(prn, prn_n);
 
     free(prn);
     printf("%d checks, %d failures\n", checks, failures);
