@@ -34,6 +34,7 @@ every release's notes.
       timing, Display P3 source).
 - [ ] M4: a print route works on a real CP1500 with the vendor's settings
       (`Documentation/PRINT_SETTINGS.md`).
+- [ ] Printer colour management confirmed off (the CP1500 only allows turning it off) and checked on a physical print.
 - [ ] Track P: at least a first physical print comparison, or the "experimental, model-based"
       notice is kept in the app and README and 1.0.0 is explicitly declared without it.
 - [ ] README/user documentation with limitations; app icon.

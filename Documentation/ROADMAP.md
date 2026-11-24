@@ -105,6 +105,7 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [x] UI language: English by default, Italian selectable in the app (`Localization.swift`, `ItalianStrings.swift`; a test checks that every text used in the code has an Italian entry with matching placeholders).
 
 ### M4 - Print submission (no longer gated on physical prints)
+- [ ] Known constraint (owner): the CP1500 offers no print settings other than disabling colour management. The app must instruct/ensure it is disabled; confirm on a physical print (see Track P).
 - [ ] Record the vendor's printer-setting instructions verbatim-in-substance in `Documentation/PRINT_SETTINGS.md` (owner to supply), and design the print route around them (sRGB pass-through, no second conversion, no printer-side enhancement).
 - [ ] Choose the route (system print dialog, AirPrint/IPP, or hand-off to the Canon app); sizing/fit/borders for 100 x 148 mm; job status, errors, cancellation; temp-file lifetime.
 - [ ] Ship behind an "experimental, vendor-trusted colour model" notice.
@@ -113,6 +114,7 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
 
 ## Track P - Physical validation (optional, owner-scheduled)
+- [ ] **To check at the first physical print (owner note, 2026-11-24):** on the SELPHY CP1500 the print settings cannot be changed, except for switching colour management off. Verify that the print route (system dialog / Canon app) really has colour management **off**, so the pre-corrected sRGB-tagged file is not converted a second time; compare a print with and without that setting to confirm. M4 must tell the user to switch it off.
 Not blocking. When prints become possible: matched uncorrected/corrected chart set (ramps, shadow steps, skin tones, primaries, gradient, one photograph) at the printer's native raster, 3 repeats, same paper pack and settings, randomised order, neutral light, measured patches if an instrument is available; results in `Documentation/validation/`. Use it to confirm or revise the default intent/BPC and the print-path identity assumption.
 
 ## Working rules
