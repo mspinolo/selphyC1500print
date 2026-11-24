@@ -26,6 +26,8 @@ struct PreviewPanel: View {
     @State private var errorMessage: String?
     @State private var isRendering = false
     @State private var sliderFraction = 0.5
+    /// Keeps the decoded/corrected buffers and renderings between re-renders.
+    @State private var session = PreviewSession()
 
     /// Everything that changes the result; used to re-render automatically.
     private struct RenderKey: Equatable {
@@ -200,8 +202,9 @@ struct PreviewPanel: View {
             )
             options.simulatePaperWhite = simulatePaperWhite
             options.previewBlackPointCompensation = previewBlackPointCompensation
+            let session = session
             let result = try await Task.detached(priority: .userInitiated) {
-                try PreviewService.makePreview(sourceURL: photo, printerICC: printerICC, display: display, options: options)
+                try session.makePreview(sourceURL: photo, printerICC: printerICC, display: display, options: options)
             }.value
             if Task.isCancelled { return }
             preview = result

@@ -598,10 +598,15 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
     // MARK: - Soft-proof preview
 
     private func makePreview(of url: URL, intent: RenderingIntent = .relativeColorimetric,
-                             display: PreviewService.Display? = nil, maxDimension: Int = 1400) throws -> PreviewService.Preview {
+                             display: PreviewService.Display? = nil, maxDimension: Int = 1400,
+                             paperWhite: Bool = false, session: PreviewSession? = nil) throws -> PreviewService.Preview {
         let printerICC = try Data(contentsOf: try realProfileURL())
         var options = PreviewService.Options(intent: intent, blackPointCompensation: false)
         options.maxDimension = maxDimension
+        options.simulatePaperWhite = paperWhite
+        if let session {
+            return try session.makePreview(sourceURL: url, printerICC: printerICC, display: display, options: options)
+        }
         return try PreviewService.makePreview(sourceURL: url, printerICC: printerICC, display: display, options: options)
     }
 
@@ -766,12 +771,156 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
 
+        let session = PreviewSession()
         let start = Date()
-        let preview = try makePreview(of: url)
-        let elapsed = Date().timeIntervalSince(start)
-        print("Preview check timing: 3000x2000 source -> \(preview.corrected.width)x\(preview.corrected.height) preview in \(String(format: "%.2f", elapsed)) s")
+        let preview = try makePreview(of: url, session: session)
+        let cold = Date().timeIntervalSince(start)
+        let stages = session.timings
+        let warmStart = Date()
+        _ = try makePreview(of: url, paperWhite: true, session: session)
+        let toggle = Date().timeIntervalSince(warmStart)
+        let repeatStart = Date()
+        _ = try makePreview(of: url, paperWhite: true, session: session)
+        let repeated = Date().timeIntervalSince(repeatStart)
+        print("Preview check timing: 3000x2000 -> \(preview.corrected.width)x\(preview.corrected.height); cold \(String(format: "%.2f", cold)) s, option toggle \(String(format: "%.2f", toggle)) s, repeat \(String(format: "%.3f", repeated)) s; stages \(stages.map { "\($0.key)=\(String(format: "%.2f", $0.value))" }.sorted().joined(separator: " "))")
         XCTAssertEqual(max(preview.corrected.width, preview.corrected.height), 1400)
-        XCTAssertLessThan(elapsed, 30)
+        XCTAssertLessThanOrEqual(max(preview.heatMap.width, preview.heatMap.height), 512, "the checks run on a reduced copy")
+        XCTAssertLessThan(cold, 30)
+        XCTAssertLessThan(toggle, cold * 0.6, "toggling a display option must not repeat decoding, correction and checks")
+        XCTAssertLessThan(repeated, 0.25 * max(cold, 0.1), "an identical request is served from memory")
+        XCTAssertEqual(session.counters, PreviewSession.Counters(corrections: 1, transforms: 2, renders: 2))
+    }
+
+    /// Cached stages must be invalidated exactly by what they depend on, and must give the
+    /// same images as a fresh computation.
+    func testPreviewSessionCachesAndInvalidates() throws {
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let first = try makeSolidImageFile(type: .png, colorSpace: srgb, red: 0.6, green: 0.4, blue: 0.3)
+        let second = try makeSolidImageFile(type: .png, colorSpace: srgb, red: 0.2, green: 0.5, blue: 0.7)
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+        }
+        let session = PreviewSession()
+        let one = try makePreview(of: first, session: session)
+        XCTAssertEqual(session.counters, .init(corrections: 1, transforms: 1, renders: 1))
+        _ = try makePreview(of: first, session: session)
+        XCTAssertEqual(session.counters, .init(corrections: 1, transforms: 1, renders: 1), "identical request: nothing recomputed")
+
+        _ = try makePreview(of: first, paperWhite: true, session: session)
+        XCTAssertEqual(session.counters, .init(corrections: 1, transforms: 2, renders: 2), "display option: only transform and render")
+
+        _ = try makePreview(of: first, intent: .perceptual, session: session)
+        XCTAssertEqual(session.counters, .init(corrections: 2, transforms: 2, renders: 3), "intent changes the correction")
+
+        _ = try makePreview(of: second, session: session)
+        XCTAssertEqual(session.counters.corrections, 3, "another photo")
+        _ = try makePreview(of: first, session: session)
+        XCTAssertEqual(session.counters.corrections, 3, "switching back to a photo is served from memory")
+
+        // A modified file is recomputed.
+        let before = session.counters.corrections
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -5000)], ofItemAtPath: first.path)
+        _ = try makePreview(of: first, session: session)
+        XCTAssertEqual(session.counters.corrections, before + 1, "a changed file must not be served from the cache")
+
+        // Cached and fresh results are identical.
+        let fresh = try makePreview(of: first)
+        func pixels(_ image: CGImage) throws -> [UInt8] { try rgbaPixels(of: image).pixels }
+        XCTAssertEqual(try pixels(one.corrected), try pixels(fresh.corrected))
+        XCTAssertEqual(try pixels(one.uncorrected), try pixels(fresh.uncorrected))
+        XCTAssertEqual(one.stats, fresh.stats)
+
+        session.removeAll()
+        _ = try makePreview(of: first, session: session)
+        XCTAssertEqual(session.counters.corrections, before + 2, "removeAll drops the caches")
+    }
+
+    // MARK: - Saving copies
+
+    private func makeTemporaryFolder() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-save-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        return url
+    }
+
+    func testGeneratedFilesAreNamedAfterTheSource() throws {
+        let profileURL = try realProfileURL()
+        let url = try makeRGBJPEG()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [url, url], printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+        let base = url.deletingPathExtension().lastPathComponent
+        XCTAssertEqual(result.files.map(\.lastPathComponent), ["\(base)_SELPHY.png", "\(base)_SELPHY 2.png"])
+        XCTAssertFalse(result.effectiveBlackPointCompensation)
+    }
+
+    func testSavingCopiesNeverOverwritesOrDeletes() throws {
+        let profileURL = try realProfileURL()
+        let url = try makeRGBJPEG()
+        let folder = try makeTemporaryFolder()
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let originalBytes = try Data(contentsOf: url)
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [url], printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+        let generated = try XCTUnwrap(result.files.first)
+
+        // A file with the same name already exists in the destination.
+        let clash = folder.appendingPathComponent(generated.lastPathComponent)
+        try Data("precious".utf8).write(to: clash)
+
+        let saved = try ExportService.save(copies: result.files, to: folder)
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertNotEqual(saved[0], clash)
+        XCTAssertTrue(saved[0].lastPathComponent.hasSuffix(" 2.png"), saved[0].lastPathComponent)
+        XCTAssertEqual(try Data(contentsOf: clash), Data("precious".utf8), "an existing file must never be overwritten")
+        XCTAssertEqual(try Data(contentsOf: saved[0]), try Data(contentsOf: generated), "the saved copy is byte-identical")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: generated.path), "the temporary copy is kept")
+        XCTAssertEqual(try Data(contentsOf: url), originalBytes, "the source photo is untouched")
+
+        // Saving again adds, never replaces.
+        let again = try ExportService.save(copies: result.files, to: folder)
+        XCTAssertTrue(again[0].lastPathComponent.hasSuffix(" 3.png"), again[0].lastPathComponent)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).count, 3)
+    }
+
+    func testSavingFailureRemovesOnlyWhatItCreated() throws {
+        let profileURL = try realProfileURL()
+        let url = try makeRGBJPEG()
+        let folder = try makeTemporaryFolder()
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [url], printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+        let existing = folder.appendingPathComponent("already-there.txt")
+        try Data("keep".utf8).write(to: existing)
+        let missing = result.folder.appendingPathComponent("does-not-exist.png")
+
+        XCTAssertThrowsError(try ExportService.save(copies: result.files + [missing], to: folder)) { error in
+            guard case ExportService.ExportError.copyFailed = error else { return XCTFail("unexpected \(error)") }
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["already-there.txt"],
+                       "the partial copy of this call is removed, the user's file stays")
+        XCTAssertEqual(try Data(contentsOf: existing), Data("keep".utf8))
+
+        let notAFolder = folder.appendingPathComponent("already-there.txt")
+        XCTAssertThrowsError(try ExportService.save(copies: result.files, to: notAFolder)) { error in
+            guard case ExportService.ExportError.notAFolder = error else { return XCTFail("unexpected \(error)") }
+        }
     }
 
     private func correctedPixels(of url: URL, profileURL: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {

@@ -186,7 +186,9 @@ enum PreviewService {
         }
     }
 
-    /// Builds the three preview images for one photo.
+    /// Builds the three preview images for one photo, without keeping anything between calls.
+    /// Interactive code should use a long-lived `PreviewSession` instead, which caches the
+    /// expensive stages.
     ///
     /// The caller is responsible for security-scoped access to the printer profile; access to
     /// the photo is taken here, as in `ColorCorrectionService.prepareCopies`.
@@ -196,100 +198,18 @@ enum PreviewService {
         display: Display?,
         options: Options
     ) throws -> Preview {
-        let hasAccess = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if hasAccess { sourceURL.stopAccessingSecurityScopedResource() }
-        }
-
-        // 1. Corrected device values (the same code path as the export, on a reduced copy).
-        let loaded = try ColorCorrectionService.loadSource(from: sourceURL, maxDimension: options.maxDimension)
-        let correctionTransform = try ColorCorrectionService.ColorTransform(
-            sourceICC: loaded.embeddedICC,
-            printerICC: printerICC,
-            intent: options.intent,
-            blackPointCompensation: options.blackPointCompensation
-        )
-        let (width, height) = ColorCorrectionService.orientedSize(
-            width: loaded.width, height: loaded.height, orientation: loaded.orientation
-        )
-        let correctedDevice = try ColorCorrectionService.convertRGBX16Pixels(
-            loaded.pixels, width: loaded.width, height: loaded.height,
-            transform: correctionTransform, orientation: loaded.orientation
-        )
-
-        // 2. Uncorrected device values: the photo as sRGB numbers, as any application would
-        //    hand it to the printer. A source with its own wide-gamut profile is converted to
-        //    sRGB first, like at export.
-        let sRGBDevice: Data
-        if loaded.embeddedICC == nil {
-            sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
-                loaded.pixels, width: loaded.width, height: loaded.height,
-                transform: nil, orientation: loaded.orientation
-            )
-        } else {
-            let converted = try ColorCorrectionService.loadSource(
-                from: sourceURL, maxDimension: options.maxDimension, forceSRGB: true
-            )
-            sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
-                converted.pixels, width: converted.width, height: converted.height,
-                transform: nil, orientation: converted.orientation
-            )
-        }
-
-        // 3. Printer -> display. An unusable display profile falls back to sRGB.
-        var usedFallback = false
-        var imageSpace = display?.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-        let previewTransform: PreviewTransform
-        do {
-            previewTransform = try PreviewTransform(
-                printerICC: printerICC, displayICC: display?.iccData,
-                simulatePaperWhite: options.simulatePaperWhite,
-                blackPointCompensation: options.previewBlackPointCompensation
-            )
-        } catch where display != nil {
-            // The display profile parses but cannot be used (wrong class, no output tables...).
-            usedFallback = true
-            imageSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-            previewTransform = try PreviewTransform(
-                printerICC: printerICC, displayICC: nil,
-                simulatePaperWhite: options.simulatePaperWhite,
-                blackPointCompensation: options.previewBlackPointCompensation
-            )
-        }
-        let corrected = previewTransform.render(rgbx: correctedDevice, width: width, height: height, countOutOfGamut: true)
-        let uncorrected = previewTransform.render(rgbx: sRGBDevice, width: width, height: height, countOutOfGamut: false)
-
-        // 4. Checks and dE map, measured on the same reduced buffers.
-        let blackDevice = correctedBlack(transform: correctionTransform)
-        let (stats, deltaEMap) = try analyse(
-            printerICC: printerICC, srgbRGBX: sRGBDevice, deviceRGBX: correctedDevice,
-            pixelCount: width * height, correctedBlack: blackDevice
-        )
-
-        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
-        return Preview(
-            original: try ColorCorrectionService.makeImage(rgbx: sRGBDevice, width: width, height: height, colorSpace: sRGB),
-            uncorrected: try ColorCorrectionService.makeImage(rgbx: uncorrected.pixels, width: width, height: height, colorSpace: imageSpace),
-            corrected: try ColorCorrectionService.makeImage(rgbx: corrected.pixels, width: width, height: height, colorSpace: imageSpace),
-            outOfGamutFraction: Double(corrected.outOfGamut) / Double(max(1, width * height)),
-            usedSRGBFallback: usedFallback,
-            effectiveBlackPointCompensation: correctionTransform.effectiveBlackPointCompensation,
-            stats: stats,
-            heatMap: try makeHeatMap(deltaE: deltaEMap, width: width, height: height),
-            sourceDescription: describe(loaded),
-            displayName: usedFallback || display == nil ? "sRGB" : display!.name
-        )
+        try PreviewSession().makePreview(sourceURL: sourceURL, printerICC: printerICC, display: display, options: options)
     }
 
     /// What the correction sends to the printer for source black.
-    private static func correctedBlack(transform: ColorCorrectionService.ColorTransform) -> [UInt8] {
+    static func correctedBlack(transform: ColorCorrectionService.ColorTransform) -> [UInt8] {
         var input: [UInt16] = [0, 0, 0]
         var output: [UInt16] = [0, 0, 0]
         transform.apply16(&input, to: &output, pixelCount: 1)
         return output.map { UInt8((UInt32($0) * 255 + 32767) / 65535) }
     }
 
-    private static func packRGB(_ rgbx: Data) -> [UInt8] {
+    static func packRGB(_ rgbx: Data) -> [UInt8] {
         let count = rgbx.count / 4
         var packed = [UInt8](repeating: 0, count: count * 3)
         rgbx.withUnsafeBytes { raw in
@@ -303,35 +223,69 @@ enum PreviewService {
         return packed
     }
 
-    private static func analyse(
-        printerICC: Data, srgbRGBX: Data, deviceRGBX: Data, pixelCount: Int, correctedBlack: [UInt8]
-    ) throws -> (PhotoStats, [Float]) {
-        let source = packRGB(srgbRGBX)
-        let device = packRGB(deviceRGBX)
+    /// Longest side of the buffers used for the checks and the dE map. The statistics do not need
+    /// every pixel of the preview, and the dE00 evaluation is the most expensive step.
+    static let analysisDimension = 512
+
+    /// Every `factor`-th pixel of an oriented RGBX buffer, as packed RGB.
+    static func sampledRGB(_ rgbx: Data, width: Int, height: Int, factor: Int) -> (rgb: [UInt8], width: Int, height: Int) {
+        let sampledWidth = (width + factor - 1) / factor
+        let sampledHeight = (height + factor - 1) / factor
+        var packed = [UInt8](repeating: 0, count: sampledWidth * sampledHeight * 3)
+        rgbx.withUnsafeBytes { raw in
+            let source = raw.bindMemory(to: UInt8.self)
+            for sy in 0..<sampledHeight {
+                for sx in 0..<sampledWidth {
+                    let from = ((sy * factor) * width + sx * factor) * 4
+                    let to = (sy * sampledWidth + sx) * 3
+                    packed[to] = source[from]
+                    packed[to + 1] = source[from + 1]
+                    packed[to + 2] = source[from + 2]
+                }
+            }
+        }
+        return (packed, sampledWidth, sampledHeight)
+    }
+
+    struct Analysis {
+        let stats: PhotoStats
+        let deltaEMap: [Float]
+        let width: Int
+        let height: Int
+    }
+
+    /// Runs the core checks on a reduced copy (see `analysisDimension`).
+    static func analyse(
+        printerICC: Data, srgbRGBX: Data, deviceRGBX: Data, width: Int, height: Int, correctedBlack: [UInt8]
+    ) throws -> Analysis {
+        let factor = max(1, (max(width, height) + analysisDimension - 1) / analysisDimension)
+        let source = sampledRGB(srgbRGBX, width: width, height: height, factor: factor)
+        let device = sampledRGB(deviceRGBX, width: width, height: height, factor: factor)
+        let pixelCount = source.width * source.height
         var map = [Float](repeating: 0, count: pixelCount)
         var raw = selphy_photo_stats()
         let status: selphy_status = printerICC.withUnsafeBytes { printerBytes in
             selphy_analyze_photo(
                 printerBytes.bindMemory(to: UInt8.self).baseAddress, printerBytes.count,
-                source, device, pixelCount, correctedBlack, &map, &raw
+                source.rgb, device.rgb, pixelCount, correctedBlack, &map, &raw
             )
         }
         guard status == SELPHY_OK else {
             throw ColorCorrectionService.CorrectionError.transformCreation(String(cString: selphy_status_message(status)))
         }
-        return (
-            PhotoStats(
+        return Analysis(
+            stats: PhotoStats(
                 meanDeltaE: raw.mean_de, p95DeltaE: raw.p95_de, maxDeltaE: raw.max_de,
                 shareNotReproducible: raw.share_not_reproducible,
                 darkestToneL: raw.darkest_tone_l, shareBelowDarkestTone: raw.share_below_darkest_tone,
                 neutralShare: raw.neutral_share,
                 neutralP95Chroma: raw.neutral_p95_chroma >= 0 ? raw.neutral_p95_chroma : nil
             ),
-            map
+            deltaEMap: map, width: source.width, height: source.height
         )
     }
 
-    private static func describe(_ loaded: ColorCorrectionService.LoadedSource) -> String {
+    static func describe(_ loaded: ColorCorrectionService.LoadedSource) -> String {
         switch loaded.interpretation {
         case .embeddedProfile:
             return "profilo incorporato \(loaded.profileName ?? "RGB")"
@@ -353,7 +307,7 @@ enum PreviewService {
         return (UInt8((255 * scale).rounded()), UInt8((green * scale).rounded()), 0, UInt8(alpha.rounded()))
     }
 
-    private static func makeHeatMap(deltaE: [Float], width: Int, height: Int) throws -> CGImage {
+    static func makeHeatMap(deltaE: [Float], width: Int, height: Int) throws -> CGImage {
         var pixels = Data(count: width * height * 4)
         pixels.withUnsafeMutableBytes { raw in
             let target = raw.bindMemory(to: UInt8.self)

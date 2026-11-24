@@ -21,6 +21,8 @@ enum ColorCorrectionService {
         var assumedSRGBSources: [URL] = []
         /// Grayscale, CMYK, Lab or indexed sources: converted to sRGB by Core Graphics first.
         var convertedSources: [URL] = []
+        /// Whether black point compensation was really applied (forced for v4 perceptual/saturation).
+        var effectiveBlackPointCompensation = false
     }
 
     /// How the colour of a source was interpreted.
@@ -125,7 +127,7 @@ enum ColorCorrectionService {
             throw CorrectionError.profileLoad(error.localizedDescription)
         }
         // Fail before touching any source if the printer profile is unusable.
-        _ = try ColorTransform(
+        let validation = try ColorTransform(
             sourceICC: nil,
             printerICC: printerICC,
             intent: intent,
@@ -147,10 +149,12 @@ enum ColorCorrectionService {
                     }
                 }
 
-                let uniqueSuffix = String(UUID().uuidString.prefix(8))
-                let outputURL = sessionFolder
-                    .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY-test-\(uniqueSuffix)")
-                    .appendingPathExtension(outputFormat.fileExtension)
+                // "<name>_SELPHY.<ext>", numbered if two sources share a name.
+                let outputURL = ExportService.uniqueURL(
+                    in: sessionFolder,
+                    baseName: sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY",
+                    pathExtension: outputFormat.fileExtension
+                )
 
                 let interpretation = try correct(
                     sourceURL: sourceURL,
@@ -175,7 +179,8 @@ enum ColorCorrectionService {
 
         return Result(
             files: outputs, folder: sessionFolder,
-            assumedSRGBSources: assumedSRGB, convertedSources: converted
+            assumedSRGBSources: assumedSRGB, convertedSources: converted,
+            effectiveBlackPointCompensation: validation.effectiveBlackPointCompensation
         )
     }
 

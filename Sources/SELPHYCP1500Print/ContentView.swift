@@ -11,6 +11,9 @@ struct ContentView: View {
     @State private var profileError: String?
     @State private var generatedCopies: [URL] = []
     @State private var generatedFolder: URL?
+    @State private var generatedSummary = ""
+    @State private var showingSaveFolderPicker = false
+    @State private var savedFolder: URL?
     @State private var isPreparing = false
     @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie (JPEG, JPEG XL, PNG, TIFF)."
 
@@ -140,8 +143,13 @@ struct ContentView: View {
                             Label(url.lastPathComponent, systemImage: "doc.richtext")
                                 .lineLimit(1)
                         }
+                        if !generatedSummary.isEmpty {
+                            Text("Generate con: \(generatedSummary)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         HStack {
-                            Text("Temporanei: rimossi al prossimo utilizzo se più vecchi di 24 ore.")
+                            Text("Queste copie sono temporanee e vengono rimosse dopo 24 ore. Per conservarle, salvale in una cartella: i file esistenti non vengono mai sovrascritti né cancellati.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -149,6 +157,18 @@ struct ContentView: View {
                                 if let generatedFolder {
                                     NSWorkspace.shared.open(generatedFolder)
                                 }
+                            }
+                            Button("Salva in una cartella…") { showingSaveFolderPicker = true }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        if let savedFolder {
+                            HStack {
+                                Label("Salvate in \(savedFolder.lastPathComponent)", systemImage: "checkmark.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                                Button("Apri la cartella") { NSWorkspace.shared.open(savedFolder) }
+                                    .buttonStyle(.link)
+                                    .font(.caption)
                             }
                         }
                     }
@@ -189,11 +209,33 @@ struct ContentView: View {
             onCompletion: handlePhotoSelection
         )
         .fileImporter(
+            isPresented: $showingSaveFolderPicker,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false,
+            onCompletion: handleSaveFolderSelection
+        )
+        .fileImporter(
             isPresented: $showingProfilePicker,
             allowedContentTypes: [.data],
             allowsMultipleSelection: false,
             onCompletion: handleProfileSelection
         )
+    }
+
+    private func handleSaveFolderSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let folder = urls.first else { return }
+            do {
+                let saved = try ExportService.save(copies: generatedCopies, to: folder)
+                savedFolder = folder
+                statusMessage = "Salvate \(saved.count) copie in \(folder.lastPathComponent). Gli originali e i file già presenti non sono stati modificati."
+            } catch {
+                statusMessage = "Salvataggio non riuscito: \(error.localizedDescription)"
+            }
+        case .failure(let error):
+            statusMessage = "Selezione cartella non riuscita: \(error.localizedDescription)"
+        }
     }
 
     private func handlePhotoSelection(_ result: Result<[URL], Error>) {
@@ -267,6 +309,8 @@ struct ContentView: View {
 
                     generatedCopies = result.files
                     generatedFolder = result.folder
+                    savedFolder = nil
+                    generatedSummary = "\(intent.title) · BPC \(result.effectiveBlackPointCompensation ? "sì" : "no") · \(format.title)"
                     var message = "Generate \(result.files.count) copie temporanee. Non sono state inviate alla stampante."
                     if !result.assumedSRGBSources.isEmpty {
                         message += " Senza profilo incorporato (assunto sRGB): \(result.assumedSRGBSources.map(\.lastPathComponent).joined(separator: ", "))."
