@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var previewPhoto: URL?
     @State private var access = PhotoAccess()
     @State private var showingPhotoPicker = false
+    @State private var showingStatistics = false
     @State private var generatedCopies: [URL] = []
     @StateObject private var printService = PrintService()
     @State private var isPrinting = false
@@ -91,11 +92,22 @@ struct ContentView: View {
                 .keyboardShortcut("s", modifiers: [.command, .control])
             }
             ToolbarItem(placement: .primaryAction) {
+                Button { showingStatistics = true } label: {
+                    Label(tr("Statistics"), systemImage: "chart.bar")
+                }
+                .help(tr("Colour deviation statistics, intent comparison and export"))
+                .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { showSettings() } label: {
                     Label(tr("Settings"), systemImage: "gearshape")
                 }
                 .help(tr("Settings"))
             }
+        }
+        .sheet(isPresented: $showingStatistics) {
+            StatisticsView(photos: selectedPhotos, selected: currentPhoto)
+                .environmentObject(settings)
         }
         .fileImporter(
             isPresented: $showingPhotoPicker,

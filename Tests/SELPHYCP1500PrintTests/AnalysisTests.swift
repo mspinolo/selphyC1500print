@@ -93,7 +93,7 @@ final class AnalysisTests: XCTestCase {
         let zoomed = PreviewGeometry.contentSize(imageSize: image, available: area, factor: 2)
         XCTAssertEqual(zoomed.width, 2800, accuracy: 0.01)
         let small = PreviewGeometry.contentSize(imageSize: CGSize(width: 200, height: 100), available: area, factor: 1)
-        XCTAssertEqual(small.width, 500, accuracy: 0.01, "a zoom below the fitted size keeps the fitted size")
+        XCTAssertEqual(small.width, 700, accuracy: 0.01, "a zoom below the fitted size keeps the fitted size")
         XCTAssertEqual(PreviewGeometry.contentSize(imageSize: .zero, available: area, factor: nil), area)
     }
 

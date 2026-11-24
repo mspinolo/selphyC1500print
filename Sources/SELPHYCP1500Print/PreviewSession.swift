@@ -222,6 +222,31 @@ final class PreviewSession: @unchecked Sendable {
         )
     }
 
+    /// Result of a quick analysis: the checks and the per-pixel maps of a reduced copy.
+    struct QuickAnalysis {
+        let stats: PreviewService.PhotoStats
+        let maps: PixelMaps
+        let effectiveBlackPointCompensation: Bool
+    }
+
+    /// Analyses a photo on a reduced copy (analysis resolution) without touching the caches, for
+    /// the statistics table and the rendering-intent comparison.
+    func quickAnalysis(
+        sourceURL: URL, printerICC: Data, intent: RenderingIntent, blackPointCompensation: Bool
+    ) throws -> QuickAnalysis {
+        let hasAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess { sourceURL.stopAccessingSecurityScopedResource() }
+        }
+        var options = PreviewService.Options(intent: intent, blackPointCompensation: blackPointCompensation)
+        options.maxDimension = PreviewService.analysisDimension
+        let stage = try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options)
+        return QuickAnalysis(
+            stats: stage.analysis.stats, maps: stage.analysis.maps,
+            effectiveBlackPointCompensation: stage.effectiveBlackPointCompensation
+        )
+    }
+
     // MARK: - Stages
 
     private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options) throws -> CorrectionStage {
