@@ -40,7 +40,7 @@ enum ColorCorrectionService {
             case .bitmapContext:
                 return "Impossibile creare il buffer bitmap RGB."
             case .imageEncoding(let url):
-                return "Impossibile generare il JPEG temporaneo: \(url.lastPathComponent)"
+                return "Impossibile generare l'immagine temporanea: \(url.lastPathComponent)"
             }
         }
     }
@@ -133,7 +133,7 @@ enum ColorCorrectionService {
                 let uniqueSuffix = String(UUID().uuidString.prefix(8))
                 let outputURL = sessionFolder
                     .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY-test-\(uniqueSuffix)")
-                    .appendingPathExtension("jpg")
+                    .appendingPathExtension("png")
 
                 try correct(
                     sourceURL: sourceURL,
@@ -254,18 +254,17 @@ enum ColorCorrectionService {
 
         guard let destination = CGImageDestinationCreateWithURL(
             outputURL as CFURL,
-            UTType.jpeg.identifier as CFString,
+            UTType.png.identifier as CFString,
             1,
             nil
         ) else {
             throw CorrectionError.imageEncoding(outputURL)
         }
 
-        CGImageDestinationAddImage(
-            destination,
-            correctedImage,
-            [kCGImageDestinationLossyCompressionQuality: 0.98] as CFDictionary
-        )
+        // Lossless on purpose: the pre-correction amplifies chroma differences between
+        // neighbouring areas, and JPEG chroma subsampling/quantisation measurably
+        // degraded them (up to ~11 DeltaE2000 at patch centres on the test chart).
+        CGImageDestinationAddImage(destination, correctedImage, nil)
         guard CGImageDestinationFinalize(destination) else {
             throw CorrectionError.imageEncoding(outputURL)
         }

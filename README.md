@@ -10,7 +10,7 @@ A native macOS utility for experimental pre-correction of JPEGs for the Canon SE
 - Persistent printer name, rendering intent, BPC preference and security-scoped ICC bookmark.
 - Structural ICC validation.
 - LittleCMS transform (16-bit internally) from the source JPEG's embedded RGB profile (or assumed sRGB when absent) through PCS to the Farbenwerk printer profile's RGB device values. Black point compensation follows the ICC rules: always applied for perceptual/saturation with a v4 profile, optional for relative colorimetric.
-- Temporary JPEG copies, with the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
+- Temporary lossless PNG copies (JPEG output was measured to degrade the pre-corrected colours by up to ~11 DeltaE2000), with the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
 - EXIF orientation is applied when decoding; source files are read-only.
 - Temporary sessions are stored under the system temporary directory and abandoned sessions older than 24 hours are removed on the next conversion.
 
@@ -32,7 +32,7 @@ cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on
 SELPHY_TEST_PRINTER_PROFILE="$PWD/ICC-Profile165-CP1500.icc" swift test
 ```
 
-The core tests check error handling (truncated/garbage/wrong-class profiles), BPC semantics, that the optimised transform matches the exact pipeline (DeltaE2000), that the printer's own forward model reproduces the intended appearance for neutrals and skin tones, tone-curve monotonicity, 8-bit/16-bit consistency and honouring of wide-gamut source profiles. The macOS suite covers ICC inspection, buffer handling, JPEG output (dimensions, sRGB tag), source immutability, batch failure cleanup and end-to-end appearance.
+The core tests check error handling (truncated/garbage/wrong-class profiles), BPC semantics, that the optimised transform matches the exact pipeline (DeltaE2000), that the printer's own forward model reproduces the intended appearance for neutrals and skin tones, tone-curve monotonicity, 8-bit/16-bit consistency and honouring of wide-gamut source profiles. The macOS suite covers ICC inspection, buffer handling, PNG output (dimensions, sRGB tag), source immutability, batch failure cleanup and end-to-end appearance.
 
 These checks establish that the software does what the colour model says. They do **not** establish that the model produces more accurate physical prints; that is the optional track P in the roadmap.
 
@@ -53,4 +53,4 @@ The plan, milestones and evidence levels are maintained in [`Documentation/ROADM
 
 - Source JPEGs are never modified.
 - The app does not embed the ICC profile: the user selects it at runtime. A copy is kept at the repository root for tests.
-- Temporary JPEGs are stored outside the photo library.
+- Temporary PNGs are stored outside the photo library.

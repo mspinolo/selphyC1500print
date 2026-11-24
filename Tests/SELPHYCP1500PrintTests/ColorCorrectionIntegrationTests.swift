@@ -226,10 +226,10 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertEqual(mismatches, 0, "Swift buffer handling differs from the direct core call")
     }
 
-    /// End to end: decode the generated JPEG and ask the printer's own forward model what it
+    /// End to end: decode the generated PNG and ask the printer's own forward model what it
     /// would print. Neutral steps and skin tones must land on the intended appearance.
-    /// 1.5 dE00 = 0.5 allowed by the core (see core_tests.c) plus JPEG q=0.98 noise at flat
-    /// patch centres; to be tightened when the output becomes lossless (ROADMAP M2).
+    /// 1.0 dE00 = 0.5 allowed by the core (see core_tests.c) plus 0.5 for rounding to 8 bit
+    /// and for the (lossy) source JPEG decode. The output is lossless, so no codec error.
     func testEndToEndOutputMatchesIntendedAppearance() throws {
         let profileURL = try realProfileURL()
         let printerICC = try Data(contentsOf: profileURL)
@@ -262,7 +262,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         for patch in neutralPatches + skinPatches {
             let de = deltaE(predicted, intended, patch: patch)
             print("End-to-end patch \(patch): dE00=\(de)")
-            XCTAssertLessThanOrEqual(de, 1.5, "patch \(patch) dE00 \(de)")
+            XCTAssertLessThanOrEqual(de, 1.0, "patch \(patch) dE00 \(de)")
         }
         XCTAssertLessThanOrEqual(sumCorrected, 0.5 * sumBaseline, "correction must at least halve the mean model deviation")
     }

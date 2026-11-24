@@ -88,7 +88,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("La conversione usa il motore colore integrato (LittleCMS). In questa fase è una pre-correzione sperimentale: il JPEG risultante viene etichettato sRGB per il successivo trattamento interno della SELPHY.")
+                    Text("La conversione usa il motore colore integrato (LittleCMS). In questa fase è una pre-correzione sperimentale: l'immagine risultante (PNG senza perdita) viene etichettata sRGB per il successivo trattamento interno della SELPHY.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -114,7 +114,7 @@ struct ContentView: View {
                     }
                     .frame(minHeight: 90, maxHeight: 150)
                 }
-                Text("Gli originali vengono soltanto letti. La conversione crea nuovi JPEG temporanei.")
+                Text("Gli originali vengono soltanto letti. La conversione crea nuove immagini PNG temporanee.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
