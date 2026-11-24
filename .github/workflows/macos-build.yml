@@ -44,6 +44,23 @@ jobs:
         run: |
           set -o pipefail
           swift test 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: Build the .app bundle (ad-hoc signed)
+        run: scripts/make-app.sh "$RUNNER_TEMP/app"
+      - name: Verify bundle, signature and entitlements
+        run: |
+          app="$RUNNER_TEMP/app/SELPHY CP1500 Print.app"
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --verify --strict --deep "$app"
+          ent=$(codesign -d --entitlements - --xml "$app" 2>/dev/null || codesign -d --entitlements :- "$app")
+          for k in com.apple.security.app-sandbox com.apple.security.files.user-selected.read-write com.apple.security.files.bookmarks.app-scope; do
+            echo "$ent" | grep -q "$k" || { echo "::error::missing entitlement $k"; exit 1; }
+          done
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/SELPHY-CP1500-Print.zip"
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: SELPHY-CP1500-Print-app
+          path: ${{ runner.temp }}/SELPHY-CP1500-Print.zip
       - name: Publish test diagnostics as annotations
         if: always()
         run: |
