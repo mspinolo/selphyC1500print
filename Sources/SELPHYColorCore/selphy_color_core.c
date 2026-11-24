@@ -37,6 +37,7 @@ const char *selphy_status_message(selphy_status status) {
         case SELPHY_ERR_PRINTER_UNSUPPORTED: return "printer profile is not an RGB output profile with Lab PCS and the requested intent tables";
         case SELPHY_ERR_TRANSFORM: return "colour transform could not be created";
         case SELPHY_ERR_MEMORY: return "out of memory";
+        case SELPHY_ERR_DISPLAY_PROFILE: return "display ICC profile cannot be read or is not an RGB profile";
     }
     return "unknown status";
 }
@@ -257,4 +258,116 @@ double selphy_delta_e2000(const double lab1[3], const double lab2[3]) {
     cmsCIELab a = { lab1[0], lab1[1], lab1[2] };
     cmsCIELab b = { lab2[0], lab2[1], lab2[2] };
     return cmsCIE2000DeltaE(&a, &b, 1.0, 1.0, 1.0);
+}
+
+
+/* ---- Soft-proof preview ------------------------------------------------------------ */
+
+struct selphy_preview {
+    cmsContext context;
+    cmsHTRANSFORM transform16;    /* printer device RGB (16 bit) -> display RGB (16 bit) */
+    cmsHTRANSFORM transform_float; /* same chain in float, unclipped where the profile allows */
+};
+
+selphy_status selphy_preview_create(
+    const uint8_t *printer_icc, size_t printer_icc_size,
+    const uint8_t *display_icc, size_t display_icc_size,
+    const selphy_preview_options *options,
+    selphy_preview **out_preview) {
+    if (out_preview == NULL) return SELPHY_ERR_ARGUMENT;
+    *out_preview = NULL;
+    if (options == NULL) return SELPHY_ERR_ARGUMENT;
+
+    cmsContext ctx = cmsCreateContext(NULL, NULL);
+    if (ctx == NULL) return SELPHY_ERR_MEMORY;
+
+    cmsHPROFILE printer = NULL, display = NULL;
+    selphy_status status = open_printer(ctx, printer_icc, printer_icc_size, SELPHY_INTENT_RELATIVE_COLORIMETRIC, &printer);
+    if (status == SELPHY_OK) {
+        status = open_source(ctx, display_icc, display_icc_size, &display);
+        if (status == SELPHY_ERR_SOURCE_PROFILE || status == SELPHY_ERR_SOURCE_UNSUPPORTED) status = SELPHY_ERR_DISPLAY_PROFILE;
+        /* A display profile describes a monitor or a working space; printer, link and abstract
+           profiles are not meaningful here. */
+        if (status == SELPHY_OK) {
+            cmsProfileClassSignature cls = cmsGetDeviceClass(display);
+            if (cls != cmsSigDisplayClass && cls != cmsSigColorSpaceClass) status = SELPHY_ERR_DISPLAY_PROFILE;
+        }
+    }
+    if (status != SELPHY_OK) {
+        if (printer) cmsCloseProfile(printer);
+        if (display) cmsCloseProfile(display);
+        cmsDeleteContext(ctx);
+        return status;
+    }
+
+    cmsUInt32Number intent = options->simulate_paper_white ? INTENT_ABSOLUTE_COLORIMETRIC : INTENT_RELATIVE_COLORIMETRIC;
+    /* BPC[i] acts between profile i-1 and i: the display entry is the one that matters here. */
+    cmsBool bpc = (!options->simulate_paper_white && options->black_point_compensation) ? TRUE : FALSE;
+    cmsHPROFILE profiles[2] = { printer, display };
+    cmsBool bpcs[2] = { FALSE, bpc };
+    cmsUInt32Number intents[2] = { intent, intent };
+    cmsFloat64Number adaptation[2] = { 1.0, 1.0 };
+
+    cmsHTRANSFORM t16 = cmsCreateExtendedTransform(
+        ctx, 2, profiles, bpcs, intents, adaptation, NULL, 0,
+        TYPE_RGB_16, TYPE_RGB_16, cmsFLAGS_NOCACHE | cmsFLAGS_HIGHRESPRECALC);
+    cmsHTRANSFORM tf = cmsCreateExtendedTransform(
+        ctx, 2, profiles, bpcs, intents, adaptation, NULL, 0,
+        TYPE_RGB_FLT, TYPE_RGB_FLT, cmsFLAGS_NOCACHE | cmsFLAGS_NOOPTIMIZE);
+    cmsCloseProfile(printer);
+    cmsCloseProfile(display);
+
+    selphy_preview *result = (t16 && tf) ? (selphy_preview *)calloc(1, sizeof(*result)) : NULL;
+    if (result == NULL) {
+        if (t16) cmsDeleteTransform(t16);
+        if (tf) cmsDeleteTransform(tf);
+        cmsDeleteContext(ctx);
+        return (t16 && tf) ? SELPHY_ERR_MEMORY : SELPHY_ERR_TRANSFORM;
+    }
+    result->context = ctx;
+    result->transform16 = t16;
+    result->transform_float = tf;
+    *out_preview = result;
+    return SELPHY_OK;
+}
+
+void selphy_preview_apply_rgb8(const selphy_preview *preview,
+                               const uint8_t *device_rgb, uint8_t *display_rgb, size_t pixel_count,
+                               size_t *out_of_gamut_pixels) {
+    if (out_of_gamut_pixels != NULL) *out_of_gamut_pixels = 0;
+    if (preview == NULL || device_rgb == NULL || display_rgb == NULL) return;
+    uint16_t in16[SELPHY_CHUNK_PIXELS * 3];
+    uint16_t out16[SELPHY_CHUNK_PIXELS * 3];
+    float inf[SELPHY_CHUNK_PIXELS * 3];
+    float outf[SELPHY_CHUNK_PIXELS * 3];
+    size_t done = 0, clipped = 0;
+    while (done < pixel_count) {
+        size_t n = pixel_count - done;
+        if (n > SELPHY_CHUNK_PIXELS) n = SELPHY_CHUNK_PIXELS;
+        for (size_t i = 0; i < n * 3; i++) in16[i] = (uint16_t)(device_rgb[done * 3 + i] * 257u);
+        cmsDoTransform(preview->transform16, in16, out16, (cmsUInt32Number)n);
+        for (size_t i = 0; i < n * 3; i++) {
+            display_rgb[done * 3 + i] = (uint8_t)(((uint32_t)out16[i] * 255u + 32767u) / 65535u);
+        }
+        if (out_of_gamut_pixels != NULL) {
+            for (size_t i = 0; i < n * 3; i++) inf[i] = (float)device_rgb[done * 3 + i] / 255.0f;
+            cmsDoTransform(preview->transform_float, inf, outf, (cmsUInt32Number)n);
+            /* A pixel is clipped if any channel would round outside 0..255. */
+            const float low = -0.5f / 255.0f, high = 1.0f + 0.5f / 255.0f;
+            for (size_t p = 0; p < n; p++) {
+                const float *c = outf + p * 3;
+                if (c[0] < low || c[0] > high || c[1] < low || c[1] > high || c[2] < low || c[2] > high) clipped++;
+            }
+        }
+        done += n;
+    }
+    if (out_of_gamut_pixels != NULL) *out_of_gamut_pixels = clipped;
+}
+
+void selphy_preview_free(selphy_preview *preview) {
+    if (preview == NULL) return;
+    cmsDeleteTransform(preview->transform16);
+    cmsDeleteTransform(preview->transform_float);
+    cmsDeleteContext(preview->context);
+    free(preview);
 }

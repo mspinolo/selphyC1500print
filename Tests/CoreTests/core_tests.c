@@ -355,6 +355,173 @@ static void test_wide_gamut_source(const uint8_t *prn, size_t prn_n) {
     free(bytes);
 }
 
+
+/* ---- Soft-proof preview ------------------------------------------------------------- */
+
+static selphy_preview *make_preview(const uint8_t *prn, size_t prn_n, int paper, int bpc) {
+    selphy_preview_options o = {paper, bpc};
+    selphy_preview *p = NULL;
+    selphy_status s = selphy_preview_create(prn, prn_n, NULL, 0, &o, &p);
+    CHECK(s == SELPHY_OK && p != NULL, "preview create(paper=%d,bpc=%d): %s", paper, bpc, selphy_status_message(s));
+    return p;
+}
+
+static void test_preview_error_paths(const uint8_t *prn, size_t prn_n) {
+    selphy_preview_options o = {0, 0};
+    selphy_preview *p = NULL;
+    CHECK(selphy_preview_create(prn, prn_n, NULL, 0, NULL, &p) == SELPHY_ERR_ARGUMENT, "NULL options");
+    CHECK(selphy_preview_create(prn, prn_n, NULL, 0, &o, NULL) == SELPHY_ERR_ARGUMENT, "NULL out");
+    CHECK(selphy_preview_create(NULL, 0, NULL, 0, &o, &p) == SELPHY_ERR_ARGUMENT, "NULL printer");
+    CHECK(selphy_preview_create(prn, prn_n / 2, NULL, 0, &o, &p) == SELPHY_ERR_PRINTER_PROFILE, "truncated printer");
+    uint8_t garbage[200];
+    memset(garbage, 7, sizeof garbage);
+    CHECK(selphy_preview_create(prn, prn_n, garbage, sizeof garbage, &o, &p) == SELPHY_ERR_DISPLAY_PROFILE, "garbage display");
+    CHECK(selphy_preview_create(prn, prn_n, prn, prn_n, &o, &p) == SELPHY_ERR_DISPLAY_PROFILE,
+          "a printer profile must not be accepted as display profile");
+    CHECK(p == NULL, "no preview on error");
+    /* Calling apply with NULLs must not crash and must zero the counter. */
+    size_t clipped = 99;
+    selphy_preview_apply_rgb8(NULL, NULL, NULL, 10, &clipped);
+    CHECK(clipped == 0, "counter reset on invalid call");
+    selphy_preview_free(NULL);
+}
+
+/* Reference: the preview must agree with the independent A2B prediction (Lab) for colours
+   inside the display gamut. Neutral steps and skin tones are inside sRGB. */
+static void test_preview_matches_model(const uint8_t *prn, size_t prn_n) {
+    selphy_preview *p = make_preview(prn, prn_n, 0, 0);
+    if (!p) return;
+    uint8_t device[CHART_COUNT * 3], shown[CHART_COUNT * 3];
+    uint16_t device16[CHART_COUNT * 3], shown16[CHART_COUNT * 3];
+    make_chart16(device16);
+    for (int i = 0; i < CHART_COUNT * 3; i++) device[i] = (uint8_t)(device16[i] / 257);
+    selphy_preview_apply_rgb8(p, device, shown, CHART_COUNT, NULL);
+    for (int i = 0; i < CHART_COUNT * 3; i++) shown16[i] = (uint16_t)(shown[i] * 257);
+    double predicted[CHART_COUNT * 3], displayed[CHART_COUNT * 3];
+    CHECK(selphy_printer_predict_lab(prn, prn_n, SELPHY_INTENT_RELATIVE_COLORIMETRIC, device16, predicted, CHART_COUNT) == SELPHY_OK, "predict");
+    CHECK(selphy_source_to_lab(NULL, 0, shown16, displayed, CHART_COUNT) == SELPHY_OK, "display->lab");
+    int groups[2] = {0, 0};
+    const int *lists[2] = {neutral_patches, skin_patches};
+    const int counts[2] = {6, 3};
+    for (int g = 0; g < 2; g++)
+        for (int k = 0; k < counts[g]; k++) {
+            int i = lists[g][k];
+            double de = selphy_delta_e2000(predicted + i * 3, displayed + i * 3);
+            printf("preview model patch %d: dE00=%.3f\n", i, de);
+            /* 8-bit rounding of the display value plus the 16-bit table precision. */
+            CHECK(de <= 1.0, "preview vs A2B model patch %d: dE00 %.3f", i, de);
+            groups[g]++;
+        }
+    selphy_preview_free(p);
+}
+
+/* Closed loop: preview(corrected) must look like the original; preview(uncorrected) must not. */
+static void test_preview_closed_loop(const uint8_t *prn, size_t prn_n) {
+    selphy_preview *p = make_preview(prn, prn_n, 0, 0);
+    selphy_transform *t = make(NULL, 0, prn, prn_n, SELPHY_INTENT_RELATIVE_COLORIMETRIC, 0, 0);
+    if (!p || !t) { selphy_preview_free(p); selphy_transform_free(t); return; }
+    uint16_t src16[CHART_COUNT * 3];
+    uint8_t src8[CHART_COUNT * 3], corrected[CHART_COUNT * 3], with[CHART_COUNT * 3], without[CHART_COUNT * 3];
+    make_chart16(src16);
+    for (int i = 0; i < CHART_COUNT * 3; i++) src8[i] = (uint8_t)(src16[i] / 257);
+    selphy_transform_apply_rgb8(t, src8, corrected, CHART_COUNT);
+    selphy_preview_apply_rgb8(p, corrected, with, CHART_COUNT, NULL);
+    selphy_preview_apply_rgb8(p, src8, without, CHART_COUNT, NULL);
+
+    uint16_t with16[CHART_COUNT * 3], without16[CHART_COUNT * 3];
+    for (int i = 0; i < CHART_COUNT * 3; i++) { with16[i] = (uint16_t)(with[i] * 257); without16[i] = (uint16_t)(without[i] * 257); }
+    double original[CHART_COUNT * 3], labWith[CHART_COUNT * 3], labWithout[CHART_COUNT * 3];
+    CHECK(selphy_source_to_lab(NULL, 0, src16, original, CHART_COUNT) == SELPHY_OK, "original lab");
+    CHECK(selphy_source_to_lab(NULL, 0, with16, labWith, CHART_COUNT) == SELPHY_OK, "with lab");
+    CHECK(selphy_source_to_lab(NULL, 0, without16, labWithout, CHART_COUNT) == SELPHY_OK, "without lab");
+    double sumWith = 0, sumWithout = 0;
+    for (int i = 0; i < CHART_COUNT; i++) {
+        sumWith += selphy_delta_e2000(original + i * 3, labWith + i * 3);
+        sumWithout += selphy_delta_e2000(original + i * 3, labWithout + i * 3);
+    }
+    printf("preview closed loop: mean dE00 with correction=%.2f, without=%.2f\n", sumWith / CHART_COUNT, sumWithout / CHART_COUNT);
+    CHECK(sumWith <= 0.5 * sumWithout, "preview with correction must be at least twice as close to the original");
+    const int *lists[2] = {neutral_patches, skin_patches};
+    const int counts[2] = {6, 3};
+    for (int g = 0; g < 2; g++)
+        for (int k = 0; k < counts[g]; k++) {
+            int i = lists[g][k];
+            double de = selphy_delta_e2000(original + i * 3, labWith + i * 3);
+            CHECK(de <= 1.0, "preview of corrected vs original, patch %d: dE00 %.3f", i, de);
+        }
+    selphy_preview_free(p);
+    selphy_transform_free(t);
+}
+
+static void test_preview_white_and_black(const uint8_t *prn, size_t prn_n) {
+    selphy_preview *rel = make_preview(prn, prn_n, 0, 0);
+    selphy_preview *bpc = make_preview(prn, prn_n, 0, 1);
+    selphy_preview *abs_ = make_preview(prn, prn_n, 1, 0);
+    if (!rel || !bpc || !abs_) { selphy_preview_free(rel); selphy_preview_free(bpc); selphy_preview_free(abs_); return; }
+    const uint8_t white[3] = {255, 255, 255}, black[3] = {0, 0, 0};
+    uint8_t out[3];
+    selphy_preview_apply_rgb8(rel, white, out, 1, NULL);
+    printf("preview relative white = %d %d %d\n", out[0], out[1], out[2]);
+    CHECK(out[0] >= 250 && out[1] >= 250 && out[2] >= 250, "relative: paper white must map to display white");
+    int relWhiteMin = out[0] < out[1] ? (out[0] < out[2] ? out[0] : out[2]) : (out[1] < out[2] ? out[1] : out[2]);
+    selphy_preview_apply_rgb8(abs_, white, out, 1, NULL);
+    printf("preview absolute white = %d %d %d\n", out[0], out[1], out[2]);
+    int absWhiteMin = out[0] < out[1] ? (out[0] < out[2] ? out[0] : out[2]) : (out[1] < out[2] ? out[1] : out[2]);
+    CHECK(absWhiteMin < relWhiteMin, "paper-white simulation must show a tinted/darker paper (min %d vs %d)", absWhiteMin, relWhiteMin);
+    selphy_preview_apply_rgb8(rel, black, out, 1, NULL);
+    printf("preview relative black = %d %d %d\n", out[0], out[1], out[2]);
+    /* The printer's own black is only L*~18 (with a bluish cast in this profile): clearly
+       lifted from the display black, but still dark. */
+    int relSum = out[0] + out[1] + out[2];
+    CHECK(relSum >= 60 && relSum <= 240, "printer black is lifted but dark (got %d %d %d)", out[0], out[1], out[2]);
+    selphy_preview_apply_rgb8(bpc, black, out, 1, NULL);
+    printf("preview BPC black = %d %d %d\n", out[0], out[1], out[2]);
+    int bpcSum = out[0] + out[1] + out[2];
+    CHECK(bpcSum * 2 <= relSum, "BPC must clearly darken the printer black (%d vs %d)", bpcSum, relSum);
+    selphy_preview_free(rel);
+    selphy_preview_free(bpc);
+    selphy_preview_free(abs_);
+}
+
+static void test_preview_gamut_report_and_chunking(const uint8_t *prn, size_t prn_n) {
+    selphy_preview *p = make_preview(prn, prn_n, 0, 0);
+    if (!p) return;
+    /* Coarse sweep of the whole device cube. */
+    enum { STEPS = 9, TOTAL = STEPS * STEPS * STEPS };
+    static uint8_t cube[TOTAL * 3], shown[TOTAL * 3];
+    int n = 0;
+    for (int r = 0; r < STEPS; r++) for (int g = 0; g < STEPS; g++) for (int b = 0; b < STEPS; b++) {
+        cube[n * 3] = (uint8_t)(r * 255 / (STEPS - 1));
+        cube[n * 3 + 1] = (uint8_t)(g * 255 / (STEPS - 1));
+        cube[n * 3 + 2] = (uint8_t)(b * 255 / (STEPS - 1));
+        n++;
+    }
+    size_t clipped = 0;
+    selphy_preview_apply_rgb8(p, cube, shown, TOTAL, &clipped);
+    printf("preview gamut sweep: %zu of %d device colours fall outside sRGB\n", clipped, TOTAL);
+    CHECK(clipped > 0 && clipped < TOTAL, "some, not all, device colours are outside the display gamut (%zu)", clipped);
+
+    /* Neutral axis never clips. */
+    uint8_t gray[256 * 3], grayShown[256 * 3];
+    for (int i = 0; i < 256; i++) gray[i * 3] = gray[i * 3 + 1] = gray[i * 3 + 2] = (uint8_t)i;
+    selphy_preview_apply_rgb8(p, gray, grayShown, 256, &clipped);
+    CHECK(clipped == 0, "neutral ramp must stay inside the display gamut (%zu clipped)", clipped);
+
+    /* Chunk boundary: one big call equals pixel-by-pixel calls. */
+    enum { BIG = 10007 };
+    static uint8_t in[BIG * 3], big[BIG * 3], single[3];
+    uint32_t seed = 1;
+    for (int i = 0; i < BIG * 3; i++) { seed = seed * 1664525u + 1013904223u; in[i] = (uint8_t)(seed >> 24); }
+    selphy_preview_apply_rgb8(p, in, big, BIG, NULL);
+    int mismatches = 0;
+    for (int i = 0; i < BIG; i++) {
+        selphy_preview_apply_rgb8(p, in + i * 3, single, 1, NULL);
+        if (memcmp(single, big + i * 3, 3) != 0) mismatches++;
+    }
+    CHECK(mismatches == 0, "chunked and single-pixel preview differ in %d pixels", mismatches);
+    selphy_preview_free(p);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <printer-profile.icc>\n", argv[0]);
@@ -376,6 +543,11 @@ int main(int argc, char **argv) {
     test_ramp_monotonic(prn, prn_n);
     test_apply8_consistency(prn, prn_n);
     test_wide_gamut_source(prn, prn_n);
+    test_preview_error_paths(prn, prn_n);
+    test_preview_matches_model(prn, prn_n);
+    test_preview_closed_loop(prn, prn_n);
+    test_preview_white_and_black(prn, prn_n);
+    test_preview_gamut_report_and_chunking(prn, prn_n);
 
     free(prn);
     printf("%d checks, %d failures\n", checks, failures);

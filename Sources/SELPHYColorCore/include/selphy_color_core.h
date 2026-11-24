@@ -32,7 +32,8 @@ typedef enum {
     SELPHY_ERR_PRINTER_PROFILE = 4,     /* printer ICC data cannot be parsed */
     SELPHY_ERR_PRINTER_UNSUPPORTED = 5, /* not an RGB output profile with Lab PCS, or intent tables missing */
     SELPHY_ERR_TRANSFORM = 6,           /* transform could not be built */
-    SELPHY_ERR_MEMORY = 7
+    SELPHY_ERR_MEMORY = 7,
+    SELPHY_ERR_DISPLAY_PROFILE = 8      /* display ICC data cannot be parsed or is not an RGB profile */
 } selphy_status;
 
 typedef struct {
@@ -67,6 +68,41 @@ void selphy_transform_apply_rgb8(const selphy_transform *transform,
                                  const uint8_t *input, uint8_t *output, size_t pixel_count);
 
 void selphy_transform_free(selphy_transform *transform);
+
+/*
+ * Soft-proof preview: how device RGB values sent to the printer are expected to look,
+ * shown on a display. The printer profile is used in its forward direction (A2B,
+ * relative colorimetric tables: a physical appearance, independent of the rendering
+ * intent used for the correction) and converted to the display profile.
+ * This is a model-based simulation, not a print proof.
+ */
+typedef struct {
+    /* 0: paper white is mapped to the display white (relative colorimetric).
+       Non-zero: absolute colorimetric, the paper tint and brightness are simulated. */
+    int simulate_paper_white;
+    /* 0 shows the printer's real black level; non-zero stretches it to the display black.
+       Ignored when simulate_paper_white is set. */
+    int black_point_compensation;
+} selphy_preview_options;
+
+typedef struct selphy_preview selphy_preview;
+
+/* A NULL display_icc with size 0 means built-in sRGB. */
+selphy_status selphy_preview_create(
+    const uint8_t *printer_icc, size_t printer_icc_size,
+    const uint8_t *display_icc, size_t display_icc_size,
+    const selphy_preview_options *options,
+    selphy_preview **out_preview);
+
+/* device_rgb: packed R,G,B 8-bit values as sent to the printer; display_rgb: packed R,G,B
+   in the display profile. If out_of_gamut_pixels is not NULL it receives the number of pixels
+   whose colour lies outside the display gamut and was therefore clipped (a float evaluation of
+   the same chain; best effort for display profiles that clip in float). */
+void selphy_preview_apply_rgb8(const selphy_preview *preview,
+                               const uint8_t *device_rgb, uint8_t *display_rgb, size_t pixel_count,
+                               size_t *out_of_gamut_pixels);
+
+void selphy_preview_free(selphy_preview *preview);
 
 /* Predicted appearance of device RGB sent to the printer: printer A2B table -> Lab (D50).
    rgb16 is packed R,G,B; lab_out receives L,a,b per pixel. */
