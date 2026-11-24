@@ -151,7 +151,9 @@ final class PreviewSession: @unchecked Sendable {
             if hasAccess { sourceURL.stopAccessingSecurityScopedResource() }
         }
 
-        let modified = (try? sourceURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        // Read the date from the file system: a URL object caches resource values, which would
+        // hide a file that was edited elsewhere after the first read.
+        let modified = (try? FileManager.default.attributesOfItem(atPath: sourceURL.path))?[.modificationDate] as? Date
         let printerHash = printerICC.hashValue
         let correctionKey = CorrectionKey(
             path: sourceURL.path, modified: modified, intent: options.intent,
