@@ -9,9 +9,20 @@ A native macOS utility that pre-corrects photos for the Canon SELPHY CP1500 usin
 ## Where the project actually stands (2026-11-24)
 
 - Implemented: SwiftUI shell, ICC header/tag inspector, ColorSync pre-correction (source RGB -> PCS -> printer B2A, result tagged sRGB), batch export to a temporary folder, read-only treatment of originals.
-- Tested: 13 of 18 tests pass in CI. The 5 failures are all in `testColorSyncMatchesIndependentLittleCMSReference` (raw RGB codes, ColorSync vs LittleCMS). The latest run on `main` fails at the same step.
+- Tested: CI builds and runs 18 tests. The only failures (5 assertions) were in `testColorSyncMatchesIndependentLittleCMSReference` (raw RGB codes, ColorSync vs LittleCMS); they are now tracked as strict expected failures with unchanged thresholds (see Findings).
 - Validated: nothing yet. The owner cannot run physical prints for now and relies on the vendor's profile and printer-setting instructions. The premise "pre-corrected sRGB-tagged output prints better" is therefore *accepted on trust*, and every release note must say so.
-- The Farbenwerk profile is ICC v4.3, committed at the repository root by explicit owner decision (not reopened). Consequence: README / VALIDATION_PLAN statements that it is "not committed" are wrong and must be corrected; CI no longer needs to download it.
+- The Farbenwerk profile is ICC v4.3, committed at the repository root by explicit owner decision (not reopened). README, VALIDATION_PLAN and `.gitignore` now say so, and CI uses the committed copy.
+
+## Findings (CI run 76, commit 8a9742c)
+
+Measured with the real profile on a 32-patch sRGB chart; errors are raw 8-bit code differences between ColorSync and LittleCMS.
+
+- **Relative colorimetric, BPC off:** engines agree (mean 0.59, p95 1, max 3).
+- **ColorSync ignores BPC on the destination (printer) entry:** with BPC only on the destination, ColorSync's output is byte-identical to no BPC. Only the source entry has any effect, and its result matches neither LittleCMS BPC off (mean 10.7) nor on (mean 8.8). The production code sets both entries, so it behaves as "source entry only".
+- **LittleCMS semantics are well defined:** in a two-profile chain only the second BPC entry matters; the printer's relative-colorimetric black point is L* = 13.2, so BPC on remaps a large part of the shadow range (81 of 96 bytes change).
+- **Perceptual:** all four LittleCMS BPC combinations give identical output, consistent with LittleCMS forcing BPC for ICC v4 perceptual transforms (printer black L* = 3.14, the v4 perceptual reference black). ColorSync with BPC off lands within mean 1.52 / max 11 of it.
+
+Interpretation (engineering inference, not print-validated): the BPC toggle in the UI has no specifiable meaning under ColorSync, while LittleCMS gives documented behaviour. This pushes Decision 3 toward LittleCMS; the DeltaE harness in M1 confirms or refutes it.
 
 ## Decisions taken in this revision
 
@@ -24,9 +35,9 @@ A native macOS utility that pre-corrects photos for the Canon SELPHY CP1500 usin
 ## Milestones
 
 ### M0 - Honest baseline (small, first)
-- [ ] Fix README, VALIDATION_PLAN, `.gitignore`: describe the committed profile truthfully; CI uses the repo copy (drop the download step and the vendor-server dependency).
-- [ ] Pin and record macOS / Xcode / Swift versions; cache Homebrew; make the library build independent of the oracle where possible.
-- [ ] Reclassify the failing raw-RGB comparison as a diagnostic (reported, not asserted) until M1 defines the DeltaE metric; main CI goes green for the right reason, with the open issue stated here.
+- [x] Fix README, VALIDATION_PLAN, `.gitignore`: describe the committed profile truthfully; CI uses the repo copy (download step removed).
+- [ ] Pin and record macOS / Xcode / Swift versions (CI prints them); cache Homebrew; make the app build independent of the LittleCMS oracle where possible.
+- [x] Known ColorSync/LittleCMS divergences recorded as strict expected failures (thresholds unchanged, still reported, test fails if they start passing); CI publishes test numbers as annotations. Replaced by the DeltaE metric in M1.
 - [ ] Remove or clearly label unused assets (the 6 MB third-party TIFF is referenced by no test; confirm its licence).
 
 **Exit:** green CI on a clean checkout; docs match reality.

@@ -16,13 +16,13 @@ brew install little-cms2 pkgconf
 swift test
 ```
 
-The macOS CI workflow downloads the licensed Farbenwerk profile into its ephemeral runner and executes the real-profile integration tests without committing or uploading the profile. To run the same tests locally, make the profile available:
+The macOS CI workflow runs the real-profile integration tests against the profile committed at the repository root. To run the same tests locally:
 
 ```sh
 SELPHY_TEST_PRINTER_PROFILE="/absolute/path/ICC-Profile165-CP1500.icc" swift test
 ```
 
-The profile must not be committed, uploaded as a CI artifact, or copied into test fixtures. The CI download is used only during the ephemeral job.
+The profile lives only at the repository root (owner decision); do not copy it into test fixtures or upload it as a CI artifact.
 
 The suite currently checks:
 

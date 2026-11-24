@@ -5,6 +5,8 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 
-# ICC profiles are licensed/user-supplied assets; never commit them.
+# Other ICC profiles are user-supplied assets and must not be committed.
+# Exception (owner decision): the Farbenwerk CP1500 profile at the repository root.
 *.icc
 *.icm
+!/ICC-Profile165-CP1500.icc

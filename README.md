@@ -2,7 +2,7 @@
 
 A native macOS utility for experimental pre-correction of JPEGs for the Canon SELPHY CP1500.
 
-> **Status: experimental.** ColorSync pre-correction is implemented in source, but it has not yet been compiled or validated with physical prints. Direct printing remains disabled.
+> **Status: experimental.** ColorSync pre-correction is implemented, builds and is exercised by CI. The colour model is trusted on the vendor's (Farbenwerk's) documentation and has **not** been validated with physical prints. Known open issue: ColorSync's perceptual and black-point-compensation behaviour differs from LittleCMS (see `Documentation/ROADMAP.md`). Direct printing remains disabled.
 
 ## Current milestone
 
@@ -28,14 +28,14 @@ Run the automated suite on macOS:
 swift test
 ```
 
-The suite covers ICC header/tag-table parsing, malformed profiles, end-to-end ColorSync conversion, and a numerical comparison of ColorSync output against an independent LittleCMS transform over a 32-patch sRGB chart. CI installs LittleCMS only as a test oracle; the app itself continues to use native ColorSync. The macOS CI downloads the licensed Farbenwerk profile into the ephemeral runner's temporary directory and runs the real-profile integration tests; the profile is not committed or uploaded as an artifact. To run the same tests locally, make the profile available:
+The suite covers ICC header/tag-table parsing, malformed profiles, end-to-end ColorSync conversion, and a numerical comparison of ColorSync output against an independent LittleCMS transform over a 32-patch sRGB chart. CI installs LittleCMS only as a test oracle; the app itself continues to use native ColorSync. The Farbenwerk profile is kept at the repository root (owner decision) and the macOS CI runs the real-profile integration tests against that copy. To run the same tests locally:
 
 ```sh
 brew install little-cms2 pkgconf
 SELPHY_TEST_PRINTER_PROFILE="/path/to/ICC-Profile165-CP1500.icc" swift test
 ```
 
-The integration test exercises all three supported rendering intents with BPC both off and on, checks that output JPEGs decode at the expected dimensions and are tagged sRGB, and verifies that source bytes remain unchanged. The profile is deliberately not committed to the public repository or uploaded as a CI artifact.
+The integration test exercises all three supported rendering intents with BPC both off and on, checks that output JPEGs decode at the expected dimensions and are tagged sRGB, and verifies that source bytes remain unchanged.
 
 These automated checks do **not** establish that the pre-correction model produces more accurate physical prints. That requires a controlled print comparison and, ideally, measured patches from the CP1500.
 
@@ -48,16 +48,12 @@ swift build
 swift run
 ```
 
-## Next validation steps
+## Next steps
 
-1. Compile and fix any SDK/Swift bridging issues on the target macOS.
-2. Generate test copies using the supplied ICC profile.
-3. Print matched uncorrected/corrected samples through the same CP1500 path.
-4. Compare skin tones, neutral grays, saturated colors and shadow detail.
-5. Only after validation, implement print submission and temporary-file cleanup after job completion.
+The plan, milestones and evidence levels are maintained in [`Documentation/ROADMAP.md`](Documentation/ROADMAP.md). Physical print comparison is an optional, non-blocking track there.
 
 ## Privacy
 
 - Source JPEGs are never modified.
-- The proprietary ICC profile is selected by the user and is not bundled in this repository.
+- The app does not embed the ICC profile: the user selects it at runtime. A copy is kept at the repository root for tests.
 - Temporary JPEGs are stored outside the photo library.
