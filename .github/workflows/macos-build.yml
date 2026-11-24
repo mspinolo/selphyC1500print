@@ -64,8 +64,9 @@ jobs:
           SELPHY_TEST_PRINTER_PROFILE: ${{ github.workspace }}/ICC-Profile165-CP1500.icc
         run: |
           mkdir -p "$RUNNER_TEMP/snapshots"
-          SELPHY_SNAPSHOT_DIR="$RUNNER_TEMP/snapshots" swift test --filter WindowSnapshotTests 2>&1 | tail -30
-          ls -la "$RUNNER_TEMP/snapshots"
+          SELPHY_SNAPSHOT_DIR="$RUNNER_TEMP/snapshots" swift test --filter WindowTests/testRenderWindowSnapshots > "$RUNNER_TEMP/snap.log" 2>&1 || true
+          body=$( { tail -25 "$RUNNER_TEMP/snap.log"; ls -la "$RUNNER_TEMP/snapshots"; } | cut -c1-240 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=window snapshots::${body}"
       - name: Upload window snapshots
         uses: actions/upload-artifact@v4
         with:
