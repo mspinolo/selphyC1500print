@@ -123,6 +123,17 @@ enum PreviewService {
 
         deinit { selphy_preview_free(handle) }
 
+        /// Share (0...1) of the given packed RGB device pixels whose colour lies outside the display
+        /// gamut. Meant for a reduced sample: the float evaluation is much slower than rendering.
+        func outOfGamutFraction(packedRGB: [UInt8]) -> Double {
+            let count = packedRGB.count / 3
+            guard count > 0 else { return 0 }
+            var scratch = [UInt8](repeating: 0, count: count * 3)
+            var clipped = 0
+            selphy_preview_apply_rgb8(handle, packedRGB, &scratch, count, &clipped)
+            return Double(clipped) / Double(count)
+        }
+
         /// Converts oriented 8-bit RGBX device values to display RGBX. Returns the number of
         /// out-of-gamut pixels when `countOutOfGamut` is set (otherwise 0).
         func render(rgbx device: Data, width: Int, height: Int, countOutOfGamut: Bool) -> (pixels: Data, outOfGamut: Int) {

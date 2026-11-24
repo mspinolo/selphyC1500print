@@ -78,7 +78,8 @@ final class PreviewSession: @unchecked Sendable {
     private struct RenderStage {
         let uncorrected: CGImage
         let corrected: CGImage
-        let outOfGamut: Int
+        /// Share of corrected pixels outside the display gamut, from a reduced sample.
+        let outOfGamutFraction: Double
     }
 
     /// Small least-recently-used cache.
@@ -210,7 +211,7 @@ final class PreviewSession: @unchecked Sendable {
             original: correction.original,
             uncorrected: render.uncorrected,
             corrected: render.corrected,
-            outOfGamutFraction: Double(render.outOfGamut) / Double(max(1, correction.width * correction.height)),
+            outOfGamutFraction: render.outOfGamutFraction,
             usedSRGBFallback: transform.usedSRGBFallback,
             effectiveBlackPointCompensation: correction.effectiveBlackPointCompensation,
             stats: correction.analysis.stats,
@@ -306,17 +307,19 @@ final class PreviewSession: @unchecked Sendable {
 
     private func computeRender(correction: CorrectionStage, transform: TransformStage) throws -> RenderStage {
         let corrected = transform.transform.render(
-            rgbx: correction.correctedDevice, width: correction.width, height: correction.height, countOutOfGamut: true
+            rgbx: correction.correctedDevice, width: correction.width, height: correction.height, countOutOfGamut: false
         )
         let uncorrected = transform.transform.render(
             rgbx: correction.sRGBDevice, width: correction.width, height: correction.height, countOutOfGamut: false
         )
+        let factor = max(1, (max(correction.width, correction.height) + PreviewService.analysisDimension - 1) / PreviewService.analysisDimension)
+        let sample = PreviewService.sampledRGB(correction.correctedDevice, width: correction.width, height: correction.height, factor: factor)
         return RenderStage(
             uncorrected: try ColorCorrectionService.makeImage(
                 rgbx: uncorrected.pixels, width: correction.width, height: correction.height, colorSpace: transform.imageSpace),
             corrected: try ColorCorrectionService.makeImage(
                 rgbx: corrected.pixels, width: correction.width, height: correction.height, colorSpace: transform.imageSpace),
-            outOfGamut: corrected.outOfGamut
+            outOfGamutFraction: transform.transform.outOfGamutFraction(packedRGB: sample.rgb)
         )
     }
 }
