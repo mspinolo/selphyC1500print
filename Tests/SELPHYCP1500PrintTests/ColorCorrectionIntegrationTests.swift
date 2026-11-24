@@ -859,6 +859,49 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertFalse(result.effectiveBlackPointCompensation)
     }
 
+    func testProgressIsReportedAndCancellationCleansUp() throws {
+        let profileURL = try realProfileURL()
+        let urls = try (0..<3).map { _ in try makeRGBJPEG() }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
+        let originals = try urls.map { try Data(contentsOf: $0) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SELPHYCP1500Print", isDirectory: true)
+        func sessions() -> Set<String> {
+            Set((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [])
+        }
+
+        // Progress: 0/3 first, then 1/3, 2/3, 3/3.
+        var reported: [[Int]] = []
+        let complete = try ColorCorrectionService.prepareCopies(
+            from: urls, printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false,
+            progress: { reported.append([$0, $1]) }
+        )
+        defer { try? FileManager.default.removeItem(at: complete.folder) }
+        XCTAssertEqual(reported, [[0, 3], [1, 3], [2, 3], [3, 3]])
+
+        // Cancellation after the first photo: nothing is left behind, sources untouched.
+        let before = sessions()
+        var done = 0
+        XCTAssertThrowsError(try ColorCorrectionService.prepareCopies(
+            from: urls, printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false,
+            progress: { completed, _ in done = completed },
+            shouldCancel: { done >= 1 }
+        )) { error in
+            guard case ColorCorrectionService.CorrectionError.cancelled = error else { return XCTFail("unexpected \(error)") }
+        }
+        XCTAssertEqual(sessions(), before, "a cancelled batch leaves no temporary folder")
+        XCTAssertEqual(try urls.map { try Data(contentsOf: $0) }, originals)
+
+        // Cancelled before the first photo: no work at all.
+        XCTAssertThrowsError(try ColorCorrectionService.prepareCopies(
+            from: urls, printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false,
+            shouldCancel: { true }
+        ))
+        XCTAssertEqual(sessions(), before)
+    }
+
     func testSavingCopiesNeverOverwritesOrDeletes() throws {
         let profileURL = try realProfileURL()
         let url = try makeRGBJPEG()

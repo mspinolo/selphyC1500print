@@ -2,6 +2,22 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+/// Progress of a conversion batch, updated from a background thread through the main queue.
+@MainActor
+final class ConversionProgress: ObservableObject {
+    @Published var completed = 0
+    @Published var total = 0
+
+    nonisolated func update(completed: Int, total: Int) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.completed = completed
+                self?.total = total
+            }
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var selectedPhotos: [URL] = []
@@ -15,6 +31,8 @@ struct ContentView: View {
     @State private var showingSaveFolderPicker = false
     @State private var savedFolder: URL?
     @State private var isPreparing = false
+    @StateObject private var progress = ConversionProgress()
+    @State private var conversionWork: Task<ColorCorrectionService.Result, Error>?
     @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie (JPEG, JPEG XL, PNG, TIFF)."
 
     /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile. The
@@ -158,8 +176,24 @@ struct ContentView: View {
                                     NSWorkspace.shared.open(generatedFolder)
                                 }
                             }
-                            Button("Salva in una cartella…") { showingSaveFolderPicker = true }
-                                .buttonStyle(.borderedProminent)
+                            if settings.saveFolderBookmark != nil {
+                                Button("Salva in un'altra cartella…") { showingSaveFolderPicker = true }
+                                Button("Salva in \(settings.saveFolderDisplayName)") { saveToRememberedFolder() }
+                                    .buttonStyle(.borderedProminent)
+                            } else {
+                                Button("Salva in una cartella…") { showingSaveFolderPicker = true }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                        }
+                        if settings.saveFolderBookmark != nil {
+                            HStack {
+                                Text("Cartella di salvataggio ricordata: \(settings.saveFolderDisplayName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button("Dimentica") { settings.clearSaveFolder() }
+                                    .buttonStyle(.link)
+                                    .font(.caption)
+                            }
                         }
                         if let savedFolder {
                             HStack {
@@ -186,22 +220,25 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    prepareCopies()
-                } label: {
-                    if isPreparing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.horizontal, 8)
-                    } else {
-                        Text("Genera copie di prova")
+                if isPreparing {
+                    HStack(spacing: 8) {
+                        ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
+                            .frame(width: 120)
+                        Text("\(progress.completed)/\(progress.total)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Button("Annulla") { conversionWork?.cancel() }
+                            .keyboardShortcut(.cancelAction)
                     }
+                } else {
+                    Button("Genera copie di prova") { prepareCopies() }
+                        .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
+                        .keyboardShortcut(.defaultAction)
                 }
-                .disabled(isPreparing || selectedPhotos.isEmpty || settings.profileBookmark == nil)
-                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
+        .onAppear { restoreProfileReport() }
         .fileImporter(
             isPresented: $showingPhotoPicker,
             allowedContentTypes: Self.supportedImageTypes,
@@ -226,15 +263,49 @@ struct ContentView: View {
         switch result {
         case .success(let urls):
             guard let folder = urls.first else { return }
-            do {
-                let saved = try ExportService.save(copies: generatedCopies, to: folder)
-                savedFolder = folder
-                statusMessage = "Salvate \(saved.count) copie in \(folder.lastPathComponent). Gli originali e i file già presenti non sono stati modificati."
-            } catch {
-                statusMessage = "Salvataggio non riuscito: \(error.localizedDescription)"
-            }
+            save(to: folder)
+            // Remember the folder only once it has been used successfully.
+            if savedFolder == folder { try? settings.chooseSaveFolder(at: folder) }
         case .failure(let error):
             statusMessage = "Selezione cartella non riuscita: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveToRememberedFolder() {
+        do {
+            guard let folder = try settings.resolveSaveFolderURL() else {
+                showingSaveFolderPicker = true
+                return
+            }
+            save(to: folder)
+        } catch {
+            // The folder was moved or deleted: ask again.
+            settings.clearSaveFolder()
+            statusMessage = "La cartella di salvataggio non è più raggiungibile: sceglila di nuovo."
+            showingSaveFolderPicker = true
+        }
+    }
+
+    private func save(to folder: URL) {
+        do {
+            let saved = try ExportService.save(copies: generatedCopies, to: folder)
+            savedFolder = folder
+            statusMessage = "Salvate \(saved.count) copie in \(folder.lastPathComponent). Gli originali e i file già presenti non sono stati modificati."
+        } catch {
+            statusMessage = "Salvataggio non riuscito: \(error.localizedDescription)"
+        }
+    }
+
+    /// Shows again the report of the remembered profile after a restart.
+    private func restoreProfileReport() {
+        guard profileReport == nil, profileError == nil, settings.profileBookmark != nil else { return }
+        do {
+            guard let url = try settings.resolveProfileURL() else { return }
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+            profileReport = try ICCProfileInspector.inspect(url: url)
+        } catch {
+            profileError = "Il profilo ricordato non è più leggibile: \(error.localizedDescription)"
         }
     }
 
@@ -288,6 +359,23 @@ struct ContentView: View {
             isPreparing = true
             statusMessage = "Conversione colore in corso…"
 
+            progress.update(completed: 0, total: photoURLs.count)
+            let batchProgress = progress
+            // A detached task is not cancelled with its parent: the handle is kept so that the
+            // Annulla button can cancel the conversion itself.
+            let work = Task.detached(priority: .userInitiated) {
+                try ColorCorrectionService.prepareCopies(
+                    from: photoURLs,
+                    printerProfileURL: profileURL,
+                    intent: intent,
+                    blackPointCompensation: bpc,
+                    outputFormat: format,
+                    progress: { done, total in batchProgress.update(completed: done, total: total) },
+                    shouldCancel: { Task.isCancelled }
+                )
+            }
+            conversionWork = work
+
             Task {
                 let hasProfileAccess = profileURL.startAccessingSecurityScopedResource()
                 defer {
@@ -297,15 +385,7 @@ struct ContentView: View {
                 }
 
                 do {
-                    let result = try await Task.detached(priority: .userInitiated) {
-                        try ColorCorrectionService.prepareCopies(
-                            from: photoURLs,
-                            printerProfileURL: profileURL,
-                            intent: intent,
-                            blackPointCompensation: bpc,
-                            outputFormat: format
-                        )
-                    }.value
+                    let result = try await work.value
 
                     generatedCopies = result.files
                     generatedFolder = result.folder
@@ -319,9 +399,12 @@ struct ContentView: View {
                         message += " Convertite prima in sRGB (grigi/CMYK/Lab): \(result.convertedSources.map(\.lastPathComponent).joined(separator: ", "))."
                     }
                     statusMessage = message
+                } catch ColorCorrectionService.CorrectionError.cancelled {
+                    statusMessage = "Conversione annullata. Nessun file è stato creato."
                 } catch {
                     statusMessage = "Conversione non riuscita: \(error.localizedDescription)"
                 }
+                conversionWork = nil
                 isPreparing = false
             }
         } catch {

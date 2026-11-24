@@ -79,6 +79,15 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(profileDisplayName, forKey: Keys.profileDisplayName) }
     }
 
+    /// Folder the corrected copies are saved to, remembered as a security-scoped bookmark.
+    @Published private(set) var saveFolderBookmark: Data? {
+        didSet { defaults.set(saveFolderBookmark, forKey: Keys.saveFolderBookmark) }
+    }
+
+    @Published private(set) var saveFolderDisplayName: String {
+        didSet { defaults.set(saveFolderDisplayName, forKey: Keys.saveFolderDisplayName) }
+    }
+
     private let defaults: UserDefaults
 
     private enum Keys {
@@ -88,6 +97,8 @@ final class AppSettings: ObservableObject {
         static let outputFormat = "outputFormat"
         static let profileBookmark = "profileBookmark"
         static let profileDisplayName = "profileDisplayName"
+        static let saveFolderBookmark = "saveFolderBookmark"
+        static let saveFolderDisplayName = "saveFolderDisplayName"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -98,6 +109,8 @@ final class AppSettings: ObservableObject {
         self.outputFormat = OutputFormat(rawValue: defaults.string(forKey: Keys.outputFormat) ?? "") ?? .png
         self.profileBookmark = defaults.data(forKey: Keys.profileBookmark)
         self.profileDisplayName = defaults.string(forKey: Keys.profileDisplayName) ?? ""
+        self.saveFolderBookmark = defaults.data(forKey: Keys.saveFolderBookmark)
+        self.saveFolderDisplayName = defaults.string(forKey: Keys.saveFolderDisplayName) ?? ""
     }
 
     func chooseProfile(at url: URL) throws {
@@ -123,6 +136,39 @@ final class AppSettings: ObservableObject {
             try chooseProfile(at: url)
         }
         return url
+    }
+
+    func chooseSaveFolder(at url: URL) throws {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+        let bookmark = try url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        saveFolderBookmark = bookmark
+        saveFolderDisplayName = url.lastPathComponent
+    }
+
+    /// The remembered save folder, or nil if none is set. A stale bookmark is renewed.
+    func resolveSaveFolderURL() throws -> URL? {
+        guard let saveFolderBookmark else { return nil }
+        var isStale = false
+        let url = try URL(
+            resolvingBookmarkData: saveFolderBookmark,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        if isStale {
+            try chooseSaveFolder(at: url)
+        }
+        return url
+    }
+
+    func clearSaveFolder() {
+        saveFolderBookmark = nil
+        saveFolderDisplayName = ""
     }
 
     func clearProfile() {

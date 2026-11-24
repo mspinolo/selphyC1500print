@@ -42,6 +42,7 @@ enum ColorCorrectionService {
         case transformCreation(String)
         case bitmapContext
         case imageEncoding(URL)
+        case cancelled
 
         var errorDescription: String? {
             switch self {
@@ -57,6 +58,8 @@ enum ColorCorrectionService {
                 return "Impossibile creare il buffer bitmap RGB."
             case .imageEncoding(let url):
                 return "Impossibile generare l'immagine temporanea: \(url.lastPathComponent)"
+            case .cancelled:
+                return "Conversione annullata."
             }
         }
     }
@@ -118,7 +121,9 @@ enum ColorCorrectionService {
         printerProfileURL: URL,
         intent: RenderingIntent,
         blackPointCompensation: Bool,
-        outputFormat: OutputFormat = .png
+        outputFormat: OutputFormat = .png,
+        progress: ((_ completed: Int, _ total: Int) -> Void)? = nil,
+        shouldCancel: (() -> Bool)? = nil
     ) throws -> Result {
         let printerICC: Data
         do {
@@ -141,7 +146,10 @@ enum ColorCorrectionService {
         var converted: [URL] = []
 
         do {
+            progress?(0, sourceURLs.count)
             for sourceURL in sourceURLs {
+                // Cancellation is checked between photos; a photo being converted is finished.
+                if shouldCancel?() == true { throw CorrectionError.cancelled }
                 let hasAccess = sourceURL.startAccessingSecurityScopedResource()
                 defer {
                     if hasAccess {
@@ -166,6 +174,7 @@ enum ColorCorrectionService {
                     transformCache: &transformCache
                 )
                 outputs.append(outputURL)
+                progress?(outputs.count, sourceURLs.count)
                 switch interpretation {
                 case .embeddedProfile: break
                 case .assumedSRGB: assumedSRGB.append(sourceURL)
