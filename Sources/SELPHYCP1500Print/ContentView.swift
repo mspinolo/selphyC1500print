@@ -20,11 +20,10 @@ final class ConversionProgress: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
-    @State private var selectedPhotos: [URL] = []
+    @AppStorage("sidebarVisible") private var sidebarVisible = true
+    @State private var selectedPhotos: [URL]
+    @State private var previewPhoto: URL?
     @State private var showingPhotoPicker = false
-    @State private var showingProfilePicker = false
-    @State private var profileReport: ICCProfileReport?
-    @State private var profileError: String?
     @State private var generatedCopies: [URL] = []
     @StateObject private var printService = PrintService()
     @State private var isPrinting = false
@@ -38,16 +37,21 @@ struct ContentView: View {
     /// nil = the initial hint, so that it follows the selected language.
     @State private var statusOverride: String?
 
+    /// `initialPhotos` is only used to present the window with photos already loaded (snapshots).
+    init(initialPhotos: [URL] = []) {
+        _selectedPhotos = State(initialValue: initialPhotos)
+        _previewPhoto = State(initialValue: initialPhotos.first)
+    }
+
     private var statusMessage: String {
         get { statusOverride ?? tr("Select an ICC profile and one or more photos (JPEG, JPEG XL, PNG, TIFF).") }
         nonmutating set { statusOverride = newValue }
     }
 
-    /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile. The
-    /// version is known once a profile has been inspected; the Farbenwerk profile is v4.
-    private var blackPointCompensationForced: Bool {
-        let major = profileReport.flatMap { Int($0.version.prefix(1)) } ?? 4
-        return settings.renderingIntent != .relativeColorimetric && major >= 4
+    /// The photo shown in the preview: the chosen one, or the first when the choice is gone.
+    private var currentPhoto: URL? {
+        if let previewPhoto, selectedPhotos.contains(previewPhoto) { return previewPhoto }
+        return selectedPhotos.first
     }
 
     /// JPEG XL needs a recent ImageIO (macOS 14+); it is skipped if the type is unknown.
@@ -55,210 +59,42 @@ struct ContentView: View {
         [.jpeg, .png, .tiff] + [UTType("public.jpeg-xl")].compactMap { $0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("SELPHY CP1500 Print")
-                        .font(.largeTitle.weight(.semibold))
-                    Text(tr("Colour preparation and pre-correction"))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Picker(tr("Language"), selection: $settings.language) {
-                    ForEach(AppLanguage.allCases) { language in
-                        Text(language.nativeName).tag(language)
-                    }
-                }
-                .frame(width: 190)
-                Image(systemName: "printer")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            if sidebarVisible {
+                PhotoSidebar(
+                    photos: selectedPhotos,
+                    selection: currentPhoto,
+                    select: { previewPhoto = $0 },
+                    remove: removePhoto,
+                    clear: clearPhotos,
+                    add: { showingPhotoPicker = true },
+                    drop: { addPhotos($0) }
+                )
+                .frame(width: 220)
+                .transition(.move(edge: .leading))
+                Divider()
             }
-
-            GroupBox(tr("Farbenwerk ICC profile")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(settings.profileDisplayName.isEmpty ? tr("No profile selected") : settings.profileDisplayName)
-                                .lineLimit(1)
-                            Text(tr("The path is remembered securely between launches."))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(tr("Choose profile…")) { showingProfilePicker = true }
-                        if !settings.profileDisplayName.isEmpty {
-                            Button(tr("Remove"), role: .destructive) {
-                                settings.clearProfile()
-                                profileReport = nil
-                                profileError = nil
-                            }
-                        }
-                    }
-                    if let report = profileReport {
-                        Divider()
-                        Label(report.summary, systemImage: report.isExpectedPrinterProfile ? "checkmark.seal" : "exclamationmark.triangle")
-                            .foregroundStyle(report.isExpectedPrinterProfile ? .green : .orange)
-                        Text("ICC \(report.version) · \(report.profileClass) · \(report.colorSpace) → \(report.connectionSpace)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    } else if let profileError {
-                        Label(profileError, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                    }
+            detail
+        }
+        .animation(.easeInOut(duration: 0.18), value: sidebarVisible)
+        .frame(minWidth: 760, minHeight: 520)
+        .navigationTitle("SELPHY CP1500 Print")
+        .navigationSubtitle(currentPhoto?.lastPathComponent ?? "")
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { sidebarVisible.toggle() } label: {
+                    Label(tr("Show or hide the photo list"), systemImage: "sidebar.leading")
                 }
-                .padding(.vertical, 4)
+                .help(tr("Show or hide the photo list"))
+                .keyboardShortcut("s", modifiers: [.command, .control])
             }
-
-            GroupBox(tr("Colour management")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker(tr("Rendering intent"), selection: $settings.renderingIntent) {
-                        ForEach(RenderingIntent.allCases) { intent in
-                            Text(intent.title).tag(intent)
-                        }
-                    }
-                    Picker(tr("Output file format"), selection: $settings.outputFormat) {
-                        ForEach(OutputFormat.allCases) { format in
-                            Text(format.title).tag(format)
-                        }
-                    }
-                    Text(settings.outputFormat.explanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Toggle(
-                        tr("Black point compensation (BPC)"),
-                        isOn: blackPointCompensationForced ? .constant(true) : $settings.blackPointCompensation
-                    )
-                    .disabled(blackPointCompensationForced)
-                    if blackPointCompensationForced {
-                        Text(tr("With an ICC v4 profile, black point compensation is always applied for the Perceptual and Saturation intents (ICC rule); the option only matters for Relative colorimetric."))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(tr("Conversion uses the built-in colour engine (LittleCMS). At this stage it is an experimental pre-correction: the resulting image is tagged sRGB for the SELPHY's own subsequent processing."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            ToolbarItem(placement: .primaryAction) {
+                Button { openSettings() } label: {
+                    Label(tr("Settings"), systemImage: "gearshape")
                 }
-                .padding(.vertical, 4)
-            }
-
-            GroupBox(tr("Original photos")) {
-                HStack {
-                    Text(selectedPhotos.isEmpty ? tr("No photos selected") : trn(selectedPhotos.count, one: "1 photo selected", other: "%d photos selected"))
-                    Spacer()
-                    Button(tr("Add images…")) { showingPhotoPicker = true }
-                    Button(tr("Clear"), role: .destructive) {
-                        selectedPhotos.removeAll()
-                        generatedCopies.removeAll()
-                        generatedFolder = nil
-                    }
-                    .disabled(selectedPhotos.isEmpty)
-                }
-                if !selectedPhotos.isEmpty {
-                    List(selectedPhotos, id: \.path) { url in
-                        Label(url.lastPathComponent, systemImage: "photo")
-                            .lineLimit(1)
-                    }
-                    .frame(minHeight: 90, maxHeight: 150)
-                }
-                Text(tr("Originals are only read. Conversion creates new temporary images."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            PreviewPanel(photos: selectedPhotos)
-
-            if !generatedCopies.isEmpty {
-                GroupBox(tr("Generated test copies")) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(generatedCopies, id: \.path) { url in
-                            Label(url.lastPathComponent, systemImage: "doc.richtext")
-                                .lineLimit(1)
-                        }
-                        if !generatedSummary.isEmpty {
-                            Text(trf("Generated with: %@", generatedSummary))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Text(tr("These copies are temporary and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted."))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button(tr("Show in Finder")) {
-                                if let generatedFolder {
-                                    NSWorkspace.shared.open(generatedFolder)
-                                }
-                            }
-                            Button(tr("Print…")) { printCopies() }
-                                .disabled(isPrinting)
-                            if settings.saveFolderBookmark != nil {
-                                Button(tr("Save to another folder…")) { showingSaveFolderPicker = true }
-                                Button(trf("Save to %@", settings.saveFolderDisplayName)) { saveToRememberedFolder() }
-                                    .buttonStyle(.borderedProminent)
-                            } else {
-                                Button(tr("Save to a folder…")) { showingSaveFolderPicker = true }
-                                    .buttonStyle(.borderedProminent)
-                            }
-                        }
-                        Picker(tr("Image placement"), selection: $settings.printFit) {
-                            ForEach(PrintFit.allCases) { fit in
-                                Text(fit.title).tag(fit)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 520)
-                        if settings.saveFolderBookmark != nil {
-                            HStack {
-                                Text(trf("Remembered save folder: %@", settings.saveFolderDisplayName))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Button(tr("Forget")) { settings.clearSaveFolder() }
-                                    .buttonStyle(.link)
-                                    .font(.caption)
-                            }
-                        }
-                        if let savedFolder {
-                            HStack {
-                                Label(trf("Saved to %@", savedFolder.lastPathComponent), systemImage: "checkmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
-                                Button(tr("Open folder")) { NSWorkspace.shared.open(savedFolder) }
-                                    .buttonStyle(.link)
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(statusMessage)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if isPreparing {
-                    HStack(spacing: 8) {
-                        ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
-                            .frame(width: 120)
-                        Text("\(progress.completed)/\(progress.total)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Button(tr("Cancel")) { conversionWork?.cancel() }
-                            .keyboardShortcut(.cancelAction)
-                    }
-                } else {
-                    Button(tr("Generate test copies")) { prepareCopies() }
-                        .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
-                        .keyboardShortcut(.defaultAction)
-                }
+                .help(tr("Settings"))
             }
         }
-        .padding(24)
-        .onAppear { restoreProfileReport() }
         .fileImporter(
             isPresented: $showingPhotoPicker,
             allowedContentTypes: Self.supportedImageTypes,
@@ -271,12 +107,143 @@ struct ContentView: View {
             allowsMultipleSelection: false,
             onCompletion: handleSaveFolderSelection
         )
-        .fileImporter(
-            isPresented: $showingProfilePicker,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false,
-            onCompletion: handleProfileSelection
-        )
+    }
+
+    private var detail: some View {
+        VStack(spacing: 0) {
+            PreviewPanel(photo: currentPhoto, hasPhotos: !selectedPhotos.isEmpty)
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if settings.profileBookmark == nil {
+                HStack {
+                    Label(tr("No ICC profile yet: choose the Farbenwerk profile in Settings."), systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                    Spacer()
+                    Button(tr("Open Settings…")) { openSettings() }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+            }
+            if !generatedCopies.isEmpty {
+                generatedStrip
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
+            Divider()
+            bottomBar
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+        }
+    }
+
+    private var generatedStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label(trn(generatedCopies.count, one: "1 copy ready", other: "%d copies ready"), systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+                if !generatedSummary.isEmpty {
+                    Text(generatedSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button(tr("Show in Finder")) {
+                    if let generatedFolder { NSWorkspace.shared.open(generatedFolder) }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+            HStack(spacing: 10) {
+                Picker(tr("Image placement"), selection: $settings.printFit) {
+                    ForEach(PrintFit.allCases) { fit in
+                        Text(fit.title).tag(fit)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 230)
+                Spacer()
+                Button(tr("Print…")) { printCopies() }
+                    .disabled(isPrinting)
+                if settings.saveFolderBookmark != nil {
+                    Button(tr("Save to another folder…")) { showingSaveFolderPicker = true }
+                    Button(trf("Save to %@", settings.saveFolderDisplayName)) { saveToRememberedFolder() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button(tr("Save to a folder…")) { showingSaveFolderPicker = true }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            Text(tr("These copies are temporary and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if settings.saveFolderBookmark != nil {
+                HStack {
+                    Text(trf("Remembered save folder: %@", settings.saveFolderDisplayName))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(tr("Forget")) { settings.clearSaveFolder() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+            if let savedFolder {
+                HStack {
+                    Label(trf("Saved to %@", savedFolder.lastPathComponent), systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Button(tr("Open folder")) { NSWorkspace.shared.open(savedFolder) }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(statusMessage)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                Picker(tr("Rendering intent"), selection: $settings.renderingIntent) {
+                    ForEach(RenderingIntent.allCases) { intent in
+                        Text(intent.title).tag(intent)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 260)
+                .help(settings.renderingIntent.explanation)
+                Picker(tr("Output file format"), selection: $settings.outputFormat) {
+                    ForEach(OutputFormat.allCases) { format in
+                        Text(format.title).tag(format)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 260)
+                .help(settings.outputFormat.explanation)
+                Spacer()
+                if isPreparing {
+                    ProgressView(value: Double(progress.completed), total: Double(max(1, progress.total)))
+                        .frame(width: 100)
+                    Text("\(progress.completed)/\(progress.total)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Button(tr("Cancel")) { conversionWork?.cancel() }
+                        .keyboardShortcut(.cancelAction)
+                } else {
+                    Button(tr("Generate test copies")) { prepareCopies() }
+                        .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
     }
 
     private func handleSaveFolderSelection(_ result: Result<[URL], Error>) {
@@ -352,53 +319,47 @@ struct ContentView: View {
         }
     }
 
-    /// Shows again the report of the remembered profile after a restart.
-    private func restoreProfileReport() {
-        guard profileReport == nil, profileError == nil, settings.profileBookmark != nil else { return }
-        do {
-            guard let url = try settings.resolveProfileURL() else { return }
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            profileReport = try ICCProfileInspector.inspect(url: url)
-        } catch {
-            profileError = trf("The remembered profile can no longer be read: %@", error.localizedDescription)
-        }
-    }
-
     private func handlePhotoSelection(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            selectedPhotos.append(contentsOf: urls.filter { !selectedPhotos.contains($0) })
-            statusMessage = trn(selectedPhotos.count, one: "1 photo queued.", other: "%d photos queued.")
-            generatedCopies.removeAll()
-            generatedFolder = nil
+            addPhotos(urls)
         case .failure(let error):
             statusMessage = trf("Photo selection failed: %@", error.localizedDescription)
         }
     }
 
-    private func handleProfileSelection(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let report = try ICCProfileInspector.inspect(url: url)
-                try settings.chooseProfile(at: url)
-                profileReport = report
-                profileError = nil
-                statusMessage = report.isExpectedPrinterProfile
-                    ? tr("ICC profile loaded and structure verified.")
-                    : tr("Profile loaded; check the class and colour spaces.")
-            } catch {
-                profileReport = nil
-                profileError = error.localizedDescription
-                statusMessage = trf("Unable to verify the profile: %@", error.localizedDescription)
-            }
-        case .failure(let error):
-            statusMessage = trf("Profile selection failed: %@", error.localizedDescription)
-        }
+    /// Adds photos to the list (used by the picker and by drag and drop); returns whether any was added.
+    @discardableResult
+    private func addPhotos(_ urls: [URL]) -> Bool {
+        let fresh = urls.filter { PhotoFiles.isSupported($0) && !selectedPhotos.contains($0) }
+        guard !fresh.isEmpty else { return false }
+        selectedPhotos.append(contentsOf: fresh)
+        if previewPhoto == nil || !selectedPhotos.contains(previewPhoto!) { previewPhoto = selectedPhotos.first }
+        statusMessage = trn(selectedPhotos.count, one: "1 photo queued.", other: "%d photos queued.")
+        resetGeneratedCopies()
+        return true
+    }
+
+    private func removePhoto(_ url: URL) {
+        selectedPhotos.removeAll { $0 == url }
+        if previewPhoto == url { previewPhoto = selectedPhotos.first }
+        resetGeneratedCopies()
+    }
+
+    private func clearPhotos() {
+        selectedPhotos.removeAll()
+        previewPhoto = nil
+        resetGeneratedCopies()
+    }
+
+    private func resetGeneratedCopies() {
+        generatedCopies.removeAll()
+        generatedFolder = nil
+        savedFolder = nil
+    }
+
+    private func openSettings() {
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 
     private func prepareCopies() {

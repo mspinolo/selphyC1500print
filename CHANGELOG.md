@@ -8,6 +8,10 @@ checklist in `Documentation/RELEASE.md` is fully ticked.
 ### Added
 - Print… button: sends the generated copies to the macOS print dialog (AirPrint), fit/fill
   placement, one sheet per image, notice about printer-side Image Optimize.
+- New window layout: photo list with thumbnails (hideable, drag and drop) next to a large
+  preview; choose which photo the preview shows; bottom bar with the main options; Settings
+  window (Cmd-,). Default size 980 x 680.
+- App icon.
 - App quits when its window is closed (it no longer stays running in the background).
 
 ## [0.0.1] - 2026-11-24

@@ -58,6 +58,20 @@ jobs:
         run: |
           set -o pipefail
           swift test 2>&1 | tee "$RUNNER_TEMP/test.log"
+      - name: Render window snapshots (for design review; never fails the build)
+        continue-on-error: true
+        env:
+          SELPHY_TEST_PRINTER_PROFILE: ${{ github.workspace }}/ICC-Profile165-CP1500.icc
+        run: |
+          mkdir -p "$RUNNER_TEMP/snapshots"
+          SELPHY_SNAPSHOT_DIR="$RUNNER_TEMP/snapshots" swift test --filter WindowSnapshotTests 2>&1 | tail -30
+          ls -la "$RUNNER_TEMP/snapshots"
+      - name: Upload window snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-snapshots
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
       - name: Build the .app bundle (ad-hoc signed)
         run: scripts/make-app.sh "$RUNNER_TEMP/app"
       - name: Verify bundle, signature and entitlements

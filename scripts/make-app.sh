@@ -18,6 +18,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/SELPHYCP1500Print"
 cp Packaging/Info.plist "$app/Contents/Info.plist"
+cp Packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 plutil -lint "$app/Contents/Info.plist"
 

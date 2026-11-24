@@ -6,7 +6,9 @@ import AppKit
 /// the printer profile, not a print proof.
 struct PreviewPanel: View {
     @EnvironmentObject private var settings: AppSettings
-    let photos: [URL]
+    /// The photo chosen in the sidebar.
+    let photo: URL?
+    let hasPhotos: Bool
 
     enum Mode: String, CaseIterable, Identifiable {
         case original, uncorrected, corrected, compare, heatMap
@@ -24,7 +26,6 @@ struct PreviewPanel: View {
         }
     }
 
-    @State private var selectedPhoto: URL?
     @State private var mode: Mode = .compare
     @State private var simulatePaperWhite = false
     @State private var previewBlackPointCompensation = false
@@ -45,11 +46,7 @@ struct PreviewPanel: View {
         var profile: Data?
     }
 
-    /// The chosen photo, or the first one when the choice is gone (e.g. the list was cleared).
-    private var currentPhoto: URL? {
-        if let selectedPhoto, photos.contains(selectedPhoto) { return selectedPhoto }
-        return photos.first
-    }
+    private var currentPhoto: URL? { photo }
 
     private var renderKey: RenderKey {
         RenderKey(
@@ -63,58 +60,60 @@ struct PreviewPanel: View {
     }
 
     var body: some View {
-        GroupBox(tr("Print preview (simulation)")) {
-            VStack(alignment: .leading, spacing: 8) {
-                if photos.isEmpty {
-                    Text(tr("Add a photo to see the preview."))
-                        .foregroundStyle(.secondary)
-                } else if settings.profileBookmark == nil {
-                    Text(tr("Choose the ICC profile to see the preview."))
-                        .foregroundStyle(.secondary)
-                } else {
-                    controls
-                    previewArea
-                    notes
-                    if let preview {
-                        ColorDetails(preview: preview)
+        VStack(alignment: .leading, spacing: 10) {
+            if !hasPhotos {
+                placeholder(tr("Add a photo to see the preview."), symbol: "photo.on.rectangle.angled")
+            } else if settings.profileBookmark == nil {
+                placeholder(tr("Choose the ICC profile to see the preview."), symbol: "doc.badge.gearshape")
+            } else {
+                controls
+                previewArea
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        notes
+                        if let preview {
+                            ColorDetails(preview: preview)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxHeight: 110)
             }
-            .padding(.vertical, 4)
         }
         .task(id: renderKey) { await render() }
     }
 
+    private func placeholder(_ text: String, symbol: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                if photos.count > 1 {
-                    Picker("Fotografia", selection: Binding(
-                        get: { currentPhoto },
-                        set: { selectedPhoto = $0 }
-                    )) {
-                        ForEach(photos, id: \.path) { url in
-                            Text(url.lastPathComponent).tag(Optional(url))
-                        }
-                    }
-                    .frame(maxWidth: 320)
+        HStack(spacing: 12) {
+            Picker(tr("View"), selection: $mode) {
+                ForEach(Mode.allCases) { mode in
+                    Text(mode.title).tag(mode)
                 }
-                Spacer()
-                Picker(tr("View"), selection: $mode) {
-                    ForEach(Mode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 560)
             }
-            HStack(spacing: 16) {
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 560)
+            Spacer()
+            Menu {
                 Toggle(tr("Simulate paper white"), isOn: $simulatePaperWhite)
                 Toggle(tr("Monitor black instead of printed black"), isOn: $previewBlackPointCompensation)
                     .disabled(simulatePaperWhite)
+            } label: {
+                Label(tr("Preview options"), systemImage: "slider.horizontal.3")
             }
-            .font(.caption)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
     }
 
@@ -134,7 +133,7 @@ struct PreviewPanel: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 260, maxHeight: 340)
+        .frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
     }
 
     @ViewBuilder

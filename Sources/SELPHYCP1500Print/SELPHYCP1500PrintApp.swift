@@ -18,10 +18,14 @@ struct SELPHYCP1500PrintApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(settings)
-                .frame(minWidth: 820, minHeight: 900)
         }
+        .defaultSize(width: 980, height: 680)
         .commands {
             CommandGroup(replacing: .newItem) {}
+        }
+        Settings {
+            SettingsView()
+                .environmentObject(settings)
         }
     }
 }
