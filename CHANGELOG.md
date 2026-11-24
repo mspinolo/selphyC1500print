@@ -3,6 +3,13 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [Unreleased]
+
+### Added
+- Print… button: sends the generated copies to the macOS print dialog (AirPrint), fit/fill
+  placement, one sheet per image, notice about printer-side Image Optimize.
+- App quits when its window is closed (it no longer stays running in the background).
+
 ## [0.0.1] - 2026-11-24
 First pre-release. Not verified on physical prints and not yet checked by the owner on a Mac.
 
