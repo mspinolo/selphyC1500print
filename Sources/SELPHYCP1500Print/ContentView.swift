@@ -265,7 +265,14 @@ struct ContentView: View {
 
                     generatedCopies = result.files
                     generatedFolder = result.folder
-                    statusMessage = "Generate \(result.files.count) copie temporanee. Non sono state inviate alla stampante."
+                    var message = "Generate \(result.files.count) copie temporanee. Non sono state inviate alla stampante."
+                    if !result.assumedSRGBSources.isEmpty {
+                        message += " Senza profilo incorporato (assunto sRGB): \(result.assumedSRGBSources.map(\.lastPathComponent).joined(separator: ", "))."
+                    }
+                    if !result.convertedSources.isEmpty {
+                        message += " Convertite prima in sRGB (grigi/CMYK/Lab): \(result.convertedSources.map(\.lastPathComponent).joined(separator: ", "))."
+                    }
+                    statusMessage = message
                 } catch {
                     statusMessage = "Conversione non riuscita: \(error.localizedDescription)"
                 }

@@ -124,23 +124,74 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertTrue(result.files.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
     }
 
-    func testGrayscaleJPEGIsRejectedWithoutChangingSource() throws {
+    /// Grayscale sources are converted to sRGB first and then corrected; the source is untouched.
+    func testGrayscaleSourcesAreConvertedAndMonotonic() throws {
         let profileURL = try realProfileURL()
-        let sourceURL = try makeGrayscaleJPEG()
-        defer { try? FileManager.default.removeItem(at: sourceURL) }
-        let original = try Data(contentsOf: sourceURL)
-
-        XCTAssertThrowsError(try ColorCorrectionService.prepareCopies(
-            from: [sourceURL],
-            printerProfileURL: profileURL,
-            intent: .perceptual,
-            blackPointCompensation: false
-        )) { error in
-            guard case ColorCorrectionService.CorrectionError.unsupportedColorSpace = error else {
-                return XCTFail("Expected unsupportedColorSpace, got \(error)")
-            }
+        var centres: [Int] = []
+        for level in [0.2, 0.5, 0.8] as [CGFloat] {
+            let url = try makeGrayImageFile(level: level)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let original = try Data(contentsOf: url)
+            let result = try ColorCorrectionService.prepareCopies(
+                from: [url], printerProfileURL: profileURL,
+                intent: .relativeColorimetric, blackPointCompensation: false
+            )
+            defer { try? FileManager.default.removeItem(at: result.folder) }
+            XCTAssertEqual(result.convertedSources, [url])
+            XCTAssertEqual(try Data(contentsOf: url), original)
+            let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
+            let c = rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels)
+            centres.append(Int(c[0]) + Int(c[1]) + Int(c[2]))
         }
-        XCTAssertEqual(try Data(contentsOf: sourceURL), original)
+        XCTAssertLessThan(centres[0], centres[1])
+        XCTAssertLessThan(centres[1], centres[2])
+    }
+
+    /// CMYK paper white must stay white; CMYK black must be much darker than mid tones.
+    func testCMYKSourceIsConverted() throws {
+        let profileURL = try realProfileURL()
+        var sums: [Int] = []
+        for (c, m, y, k) in [(0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
+            let url = try makeCMYKJPEG(c: c, m: m, y: y, k: k)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let result = try ColorCorrectionService.prepareCopies(
+                from: [url], printerProfileURL: profileURL,
+                intent: .relativeColorimetric, blackPointCompensation: false
+            )
+            defer { try? FileManager.default.removeItem(at: result.folder) }
+            XCTAssertEqual(result.convertedSources, [url])
+            let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
+            let px = rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels)
+            sums.append(Int(px[0]) + Int(px[1]) + Int(px[2]))
+        }
+        XCTAssertGreaterThan(sums[0], 3 * 240, "CMYK white must stay white")
+        XCTAssertLessThan(sums[2], sums[1])
+        XCTAssertLessThan(sums[1], sums[0])
+    }
+
+    /// An image without an embedded profile must convert exactly like the same image tagged sRGB.
+    func testUntaggedSourceIsTreatedAsSRGB() throws {
+        let profileURL = try realProfileURL()
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let tagged = try makeSolidImageFile(type: .png, colorSpace: srgb, red: 0.55, green: 0.40, blue: 0.30)
+        let untagged = try makeSolidImageFile(type: .png, colorSpace: CGColorSpaceCreateDeviceRGB(), red: 0.55, green: 0.40, blue: 0.30)
+        defer {
+            try? FileManager.default.removeItem(at: tagged)
+            try? FileManager.default.removeItem(at: untagged)
+        }
+        var centres: [[UInt8]] = []
+        for url in [tagged, untagged] {
+            let result = try ColorCorrectionService.prepareCopies(
+                from: [url], printerProfileURL: profileURL,
+                intent: .relativeColorimetric, blackPointCompensation: false
+            )
+            defer { try? FileManager.default.removeItem(at: result.folder) }
+            print("Untagged probe \(url.lastPathComponent): assumed=\(result.assumedSRGBSources.count) converted=\(result.convertedSources.count)")
+            let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
+            centres.append(rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels))
+        }
+        let largestDifference = zip(centres[0], centres[1]).map { abs(Int($0) - Int($1)) }.max() ?? 0
+        XCTAssertLessThanOrEqual(largestDifference, 2, "untagged RGB must behave as sRGB, got \(centres)")
     }
 
     // MARK: - Colour-core integration
@@ -397,6 +448,229 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(centre.min() ?? 0, 245, "transparent pixels must become white, got \(centre)")
     }
 
+    /// Each EXIF orientation 1-8, applied at 16-bit precision, must equal the geometric
+    /// transform of the orientation-1 output (same pixels, only the tag differs).
+    func testEXIFOrientationsMatchGeometricTransform() throws {
+        let profileURL = try realProfileURL()
+        let baseURL = try makeOrientedTIFF(orientation: 1)
+        defer { try? FileManager.default.removeItem(at: baseURL) }
+        let base = try correctedPixels(of: baseURL, profileURL: profileURL)
+        XCTAssertEqual(base.width, 6)
+        XCTAssertEqual(base.height, 4)
+
+        for orientation in 2...8 {
+            let url = try makeOrientedTIFF(orientation: orientation)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let out = try correctedPixels(of: url, profileURL: profileURL)
+            let swapped = orientation >= 5
+            XCTAssertEqual(out.width, swapped ? 4 : 6, "orientation \(orientation) width")
+            XCTAssertEqual(out.height, swapped ? 6 : 4, "orientation \(orientation) height")
+            let w = base.width, h = base.height
+            var mismatches = 0
+            for y in 0..<out.height {
+                for x in 0..<out.width {
+                    let (sx, sy): (Int, Int)
+                    switch orientation {
+                    case 2: (sx, sy) = (w - 1 - x, y)
+                    case 3: (sx, sy) = (w - 1 - x, h - 1 - y)
+                    case 4: (sx, sy) = (x, h - 1 - y)
+                    case 5: (sx, sy) = (y, x)
+                    case 6: (sx, sy) = (y, h - 1 - x)
+                    case 7: (sx, sy) = (w - 1 - y, h - 1 - x)
+                    default: (sx, sy) = (w - 1 - y, x)
+                    }
+                    let got = rgb(at: (y * out.width + x) * 4, in: out.pixels)
+                    let want = rgb(at: (sy * w + sx) * 4, in: base.pixels)
+                    if got != want { mismatches += 1 }
+                }
+            }
+            XCTAssertEqual(mismatches, 0, "orientation \(orientation): \(mismatches) pixels differ from the expected geometry")
+        }
+    }
+
+    /// Source resolution is carried to the output (axes follow rotations); none is invented.
+    func testOutputResolutionMetadata() throws {
+        let profileURL = try realProfileURL()
+        let withDPI = try makeOrientedTIFF(orientation: 6, dpiWidth: 300, dpiHeight: 200)
+        let withoutDPI = try makeOrientedTIFF(orientation: 1)
+        defer {
+            try? FileManager.default.removeItem(at: withDPI)
+            try? FileManager.default.removeItem(at: withoutDPI)
+        }
+        func properties(of url: URL) throws -> [CFString: Any] {
+            let result = try ColorCorrectionService.prepareCopies(
+                from: [url], printerProfileURL: profileURL,
+                intent: .relativeColorimetric, blackPointCompensation: false
+            )
+            defer { try? FileManager.default.removeItem(at: result.folder) }
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(try XCTUnwrap(result.files.first) as CFURL, nil))
+            return try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        }
+        let rotated = try properties(of: withDPI)
+        // Orientation 6 swaps the axes: 300 x 200 (w x h) becomes 200 x 300.
+        XCTAssertEqual((rotated[kCGImagePropertyDPIWidth] as? NSNumber)?.doubleValue ?? 0, 200, accuracy: 1)
+        XCTAssertEqual((rotated[kCGImagePropertyDPIHeight] as? NSNumber)?.doubleValue ?? 0, 300, accuracy: 1)
+        let leftoverOrientation = (rotated[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        XCTAssertEqual(leftoverOrientation, 1, "orientation must be baked in, not left as a tag")
+    }
+
+    /// Size guards run before any allocation.
+    func testDimensionGuards() throws {
+        XCTAssertNoThrow(try ColorCorrectionService.validateDimensions(width: 4000, height: 3000))
+        XCTAssertNoThrow(try ColorCorrectionService.validateDimensions(width: 10_000, height: 10_000))
+        XCTAssertThrowsError(try ColorCorrectionService.validateDimensions(width: 10_001, height: 10_000))
+        XCTAssertThrowsError(try ColorCorrectionService.validateDimensions(width: 0, height: 10))
+        XCTAssertThrowsError(try ColorCorrectionService.validateDimensions(width: Int.max, height: 2))
+        XCTAssertThrowsError(try ColorCorrectionService.validateDimensions(width: 2, height: Int.max))
+    }
+
+    /// Measurement, not a pass/fail product claim: how far the lossy JPEG codec moves the
+    /// corrected colours, in dE00 through the printer's own model, on a smooth textured image.
+    func testJPEGPenaltyIsSmall() throws {
+        let profileURL = try realProfileURL()
+        let printerICC = try Data(contentsOf: profileURL)
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let sourceURL = try makeTexturedImage(colorSpace: srgb)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [sourceURL], printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+        let png = try rgbaPixels(from: try XCTUnwrap(result.files.first))
+        let pngImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(
+            try XCTUnwrap(CGImageSourceCreateWithURL(try XCTUnwrap(result.files.first) as CFURL, nil)), 0, nil))
+        let pixelCount = png.width * png.height
+        func rgbOnly(_ pixels: [UInt8]) -> [UInt8] {
+            (0..<pixelCount).flatMap { [pixels[$0 * 4], pixels[$0 * 4 + 1], pixels[$0 * 4 + 2]] }
+        }
+        let reference = predictedLab(printerICC: printerICC, intent: SELPHY_INTENT_RELATIVE_COLORIMETRIC, rgb8: rgbOnly(png.pixels))
+
+        var summary: [Double: (mean: Double, max: Double)] = [:]
+        for quality in [0.98, 0.90, 0.80] as [Double] {
+            let jpegURL = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-q-\(UUID().uuidString).jpg")
+            defer { try? FileManager.default.removeItem(at: jpegURL) }
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(jpegURL as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, pngImage, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            let jpeg = try rgbaPixels(from: jpegURL)
+            let lab = predictedLab(printerICC: printerICC, intent: SELPHY_INTENT_RELATIVE_COLORIMETRIC, rgb8: rgbOnly(jpeg.pixels))
+            var sum = 0.0, worst = 0.0
+            for pixel in 0..<pixelCount {
+                let de = deltaE(lab, reference, patch: pixel)
+                sum += de
+                worst = max(worst, de)
+            }
+            summary[quality] = (sum / Double(pixelCount), worst)
+            print("JPEG penalty q=\(quality): mean dE00=\(sum / Double(pixelCount)) max dE00=\(worst)")
+        }
+        // Generous placeholder bound until the measurement is recorded; tightened afterwards.
+        XCTAssertLessThanOrEqual(summary[0.98]?.mean ?? 99, 2.0)
+    }
+
+    private func correctedPixels(of url: URL, profileURL: URL) throws -> (width: Int, height: Int, pixels: [UInt8]) {
+        let result = try ColorCorrectionService.prepareCopies(
+            from: [url], printerProfileURL: profileURL,
+            intent: .relativeColorimetric, blackPointCompensation: false
+        )
+        defer { try? FileManager.default.removeItem(at: result.folder) }
+        return try rgbaPixels(from: try XCTUnwrap(result.files.first))
+    }
+
+    /// A 6x4 lossless TIFF with a distinct colour in every pixel and a given EXIF orientation.
+    private func makeOrientedTIFF(orientation: Int, dpiWidth: Double? = nil, dpiHeight: Double? = nil) throws -> URL {
+        let width = 6, height = 4
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                bytes[i] = UInt8(20 + x * 40)
+                bytes[i + 1] = UInt8(30 + y * 55)
+                bytes[i + 2] = UInt8(200 - x * 20 - y * 25)
+            }
+        }
+        let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+        let image = try XCTUnwrap(CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: srgb, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        ))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-orient-\(UUID().uuidString).tif")
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.tiff.identifier as CFString, 1, nil))
+        var properties: [CFString: Any] = [kCGImagePropertyOrientation: orientation]
+        if let dpiWidth, let dpiHeight {
+            properties[kCGImagePropertyDPIWidth] = dpiWidth
+            properties[kCGImagePropertyDPIHeight] = dpiHeight
+        }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        // Fail loudly if the system did not write the orientation we asked for.
+        let check = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let written = (CGImageSourceCopyPropertiesAtIndex(check, 0, nil) as? [CFString: Any])?[kCGImagePropertyOrientation] as? NSNumber
+        XCTAssertEqual(written?.intValue ?? 1, orientation, "fixture orientation not stored")
+        return url
+    }
+
+    /// Smooth gradients plus deterministic texture, 96x64.
+    private func makeTexturedImage(colorSpace: CGColorSpace) throws -> URL {
+        let width = 96, height = 64
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        var seed: UInt32 = 12345
+        for y in 0..<height {
+            for x in 0..<width {
+                seed = seed &* 1664525 &+ 1013904223
+                let noise = Int(seed >> 28) - 8
+                let i = (y * width + x) * 4
+                bytes[i] = UInt8(max(0, min(255, x * 255 / (width - 1) + noise)))
+                bytes[i + 1] = UInt8(max(0, min(255, y * 255 / (height - 1) + noise)))
+                bytes[i + 2] = UInt8(max(0, min(255, 128 + (x - y) + noise)))
+            }
+        }
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+        let image = try XCTUnwrap(CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: colorSpace, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        ))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-texture-\(UUID().uuidString).png")
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    private func makeGrayImageFile(level: CGFloat) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-gray-\(UUID().uuidString).png")
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.genericGrayGamma2_2))
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 32, height: 24, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ))
+        context.setFillColor(gray: level, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    private func makeCMYKJPEG(c: CGFloat, m: CGFloat, y: CGFloat, k: CGFloat) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-cmyk-\(UUID().uuidString).jpg")
+        let space = CGColorSpaceCreateDeviceCMYK()
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 32, height: 24, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ))
+        context.setFillColor(CGColor(colorSpace: space, components: [c, m, y, k, 1])!)
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()),
+                                   [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination), "cannot write a CMYK JPEG")
+        return url
+    }
+
     private func makeSolidImageFile(
         type: UTType, colorSpace: CGColorSpace,
         red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat = 1
@@ -538,27 +812,4 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         return url
     }
 
-    private func makeGrayscaleJPEG() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("selphy-gray-\(UUID().uuidString).jpg")
-        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.genericGrayGamma2_2))
-        let context = try XCTUnwrap(CGContext(
-            data: nil,
-            width: 32,
-            height: 24,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.none.rawValue
-        ))
-        context.setFillColor(gray: 0.5, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
-        let image = try XCTUnwrap(context.makeImage())
-        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
-            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil
-        ))
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
-        XCTAssertTrue(CGImageDestinationFinalize(destination))
-        return url
-    }
 }

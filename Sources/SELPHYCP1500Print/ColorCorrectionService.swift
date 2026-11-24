@@ -17,7 +17,21 @@ enum ColorCorrectionService {
     struct Result {
         let files: [URL]
         let folder: URL
+        /// RGB sources without an embedded profile: interpreted as sRGB.
+        var assumedSRGBSources: [URL] = []
+        /// Grayscale, CMYK, Lab or indexed sources: converted to sRGB by Core Graphics first.
+        var convertedSources: [URL] = []
     }
+
+    /// How the colour of a source was interpreted.
+    enum SourceInterpretation {
+        case embeddedProfile
+        case assumedSRGB
+        case convertedToSRGB
+    }
+
+    /// Upper bound on decoded pixels (the 16-bit working buffer needs 8 bytes/pixel).
+    static let maximumPixelCount = 100_000_000
 
     enum CorrectionError: LocalizedError {
         case unreadableImage(URL)
@@ -32,7 +46,7 @@ enum ColorCorrectionService {
             case .unreadableImage(let url):
                 return "Impossibile leggere l'immagine: \(url.lastPathComponent)"
             case .unsupportedColorSpace(let url):
-                return "Sono supportate solo immagini RGB (JPEG, JPEG XL, PNG, TIFF): \(url.lastPathComponent)"
+                return "Spazio colore non supportato (sono accettati RGB, scala di grigi, CMYK, Lab): \(url.lastPathComponent)"
             case .profileLoad(let detail):
                 return "Impossibile caricare il profilo ICC: \(detail)"
             case .transformCreation(let detail):
@@ -121,6 +135,8 @@ enum ColorCorrectionService {
         let sessionFolder = try makeSessionFolder()
         var transformCache: [Data: ColorTransform] = [:]
         var outputs: [URL] = []
+        var assumedSRGB: [URL] = []
+        var converted: [URL] = []
 
         do {
             for sourceURL in sourceURLs {
@@ -136,7 +152,7 @@ enum ColorCorrectionService {
                     .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent + "_SELPHY-test-\(uniqueSuffix)")
                     .appendingPathExtension(outputFormat.fileExtension)
 
-                try correct(
+                let interpretation = try correct(
                     sourceURL: sourceURL,
                     outputURL: outputURL,
                     printerICC: printerICC,
@@ -146,15 +162,24 @@ enum ColorCorrectionService {
                     transformCache: &transformCache
                 )
                 outputs.append(outputURL)
+                switch interpretation {
+                case .embeddedProfile: break
+                case .assumedSRGB: assumedSRGB.append(sourceURL)
+                case .convertedToSRGB: converted.append(sourceURL)
+                }
             }
         } catch {
             try? FileManager.default.removeItem(at: sessionFolder)
             throw error
         }
 
-        return Result(files: outputs, folder: sessionFolder)
+        return Result(
+            files: outputs, folder: sessionFolder,
+            assumedSRGBSources: assumedSRGB, convertedSources: converted
+        )
     }
 
+    @discardableResult
     private static func correct(
         sourceURL: URL,
         outputURL: URL,
@@ -163,21 +188,41 @@ enum ColorCorrectionService {
         blackPointCompensation: Bool,
         outputFormat: OutputFormat,
         transformCache: inout [Data: ColorTransform]
-    ) throws {
+    ) throws -> SourceInterpretation {
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-              let image = makeOrientedImage(from: source) else {
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw CorrectionError.unreadableImage(sourceURL)
         }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let rawOrientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        let orientation = (1...8).contains(rawOrientation) ? rawOrientation : 1
+        let sourceDPI = Self.resolution(from: properties)
 
-        guard let imageColorSpace = image.colorSpace,
-              imageColorSpace.model == .rgb,
-              imageColorSpace.numberOfComponents == 3 else {
+        guard let imageColorSpace = image.colorSpace else {
             throw CorrectionError.unsupportedColorSpace(sourceURL)
         }
 
-        // An embedded profile is used as the source; images without one are assumed sRGB.
-        let embeddedICC = imageColorSpace.copyICCData() as Data?
-        let sourceColorSpace = embeddedICC == nil ? CGColorSpace(name: CGColorSpace.sRGB)! : imageColorSpace
+        // RGB sources use their embedded profile; without one they are assumed sRGB. Grayscale, CMYK, Lab
+        // and indexed sources are converted to sRGB by Core Graphics while decoding, using
+        // their own profile, and then go through the same transform.
+        let interpretation: SourceInterpretation
+        var embeddedICC: Data?
+        switch imageColorSpace.model {
+        case .rgb where imageColorSpace.numberOfComponents == 3:
+            embeddedICC = imageColorSpace.copyICCData() as Data?
+            interpretation = embeddedICC == nil ? .assumedSRGB : .embeddedProfile
+        case .monochrome, .cmyk, .lab, .indexed, .XYZ:
+            interpretation = .convertedToSRGB
+        default:
+            throw CorrectionError.unsupportedColorSpace(sourceURL)
+        }
+        let decodeSpace: CGColorSpace
+        if interpretation != .embeddedProfile {
+            embeddedICC = nil
+            decodeSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        } else {
+            decodeSpace = imageColorSpace
+        }
 
         let cacheKey = embeddedICC ?? Data()
         let transform: ColorTransform
@@ -195,21 +240,13 @@ enum ColorCorrectionService {
 
         let width = image.width
         let height = image.height
-        // Bound allocations before multiplying dimensions. The source is decoded to
-        // 16 bits per component (8 bytes/pixel, RGBX) so that 16-bit and linear
-        // sources (PNG, TIFF) keep their precision; the result is 4 bytes/pixel.
-        let maximumPixelCount = 100_000_000
-        guard width > 0, height > 0,
-              width <= Int.max / 8,
-              height <= Int.max / (width * 8),
-              width <= maximumPixelCount / height else {
-            throw CorrectionError.bitmapContext
-        }
-        let bytesPerRow = width * 4
+        try validateDimensions(width: width, height: height)
+        let (outputWidth, outputHeight) = orientedSize(width: width, height: height, orientation: orientation)
         let sourceBytesPerRow = width * 8
-        let byteCount = sourceBytesPerRow * height
 
-        var sourcePixels = Data(count: byteCount)
+        // The source is decoded to 16 bits per component (8 bytes/pixel, RGBX) so that 16-bit
+        // and linear sources keep their precision; the result is 4 bytes/pixel.
+        var sourcePixels = Data(count: sourceBytesPerRow * height)
         let sourceContextCreated = sourcePixels.withUnsafeMutableBytes { rawBuffer -> Bool in
             guard let context = CGContext(
                 data: rawBuffer.baseAddress,
@@ -217,7 +254,7 @@ enum ColorCorrectionService {
                 height: height,
                 bitsPerComponent: 16,
                 bytesPerRow: sourceBytesPerRow,
-                space: sourceColorSpace,
+                space: decodeSpace,
                 bitmapInfo: CGBitmapInfo.byteOrder16Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
             ) else {
                 return false
@@ -232,12 +269,15 @@ enum ColorCorrectionService {
         }
         guard sourceContextCreated else { throw CorrectionError.bitmapContext }
 
+        // EXIF orientation is applied while the converted pixels are written, at full precision.
         let correctedPixels = try convertRGBX16Pixels(
             sourcePixels,
             width: width,
             height: height,
-            transform: transform
+            transform: transform,
+            orientation: orientation
         )
+        sourcePixels = Data()
 
         // Deliberately re-tag the corrected numeric RGB values as sRGB. The
         // SELPHY has a fixed internal color pipeline; the profile is used to
@@ -245,11 +285,11 @@ enum ColorCorrectionService {
         let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
         guard let provider = CGDataProvider(data: correctedPixels as CFData),
               let correctedImage = CGImage(
-                width: width,
-                height: height,
+                width: outputWidth,
+                height: outputHeight,
                 bitsPerComponent: 8,
                 bitsPerPixel: 32,
-                bytesPerRow: bytesPerRow,
+                bytesPerRow: outputWidth * 4,
                 space: sRGB,
                 bitmapInfo: CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue)),
                 provider: provider,
@@ -271,89 +311,130 @@ enum ColorCorrectionService {
         }
 
         // PNG is the default because it is lossless: a precision pre-correction should not
-        // be followed by a lossy codec. JPEG is offered for smaller files; its real
-        // penalty has not been measured yet (ROADMAP M2).
-        let encodingOptions: CFDictionary? = outputFormat == .jpeg
-            ? [kCGImageDestinationLossyCompressionQuality: 0.98] as CFDictionary
-            : nil
-        CGImageDestinationAddImage(destination, correctedImage, encodingOptions)
+        // be followed by a lossy codec. JPEG is offered for smaller files.
+        var encodingOptions: [CFString: Any] = [:]
+        if outputFormat == .jpeg {
+            encodingOptions[kCGImageDestinationLossyCompressionQuality] = 0.98
+        }
+        // The orientation is already applied, so the resolution axes follow the rotation.
+        // A source without resolution metadata gets none (nothing is invented).
+        if let dpi = sourceDPI {
+            let swapped = orientation >= 5
+            encodingOptions[kCGImagePropertyDPIWidth] = swapped ? dpi.height : dpi.width
+            encodingOptions[kCGImagePropertyDPIHeight] = swapped ? dpi.width : dpi.height
+        }
+        CGImageDestinationAddImage(destination, correctedImage, encodingOptions as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             throw CorrectionError.imageEncoding(outputURL)
+        }
+        return interpretation
+    }
+
+    /// Resolution from the source metadata, if present and sensible.
+    private static func resolution(from properties: [CFString: Any]?) -> (width: Double, height: Double)? {
+        guard let width = (properties?[kCGImagePropertyDPIWidth] as? NSNumber)?.doubleValue,
+              let height = (properties?[kCGImagePropertyDPIHeight] as? NSNumber)?.doubleValue,
+              width.isFinite, height.isFinite, width > 0, height > 0 else {
+            return nil
+        }
+        return (width, height)
+    }
+
+    /// Rejects empty or oversized images before any buffer is allocated.
+    static func validateDimensions(width: Int, height: Int) throws {
+        guard width > 0, height > 0,
+              width <= Int.max / 8,
+              height <= Int.max / (width * 8),
+              width <= maximumPixelCount / height else {
+            throw CorrectionError.bitmapContext
+        }
+    }
+
+    /// Size after applying an EXIF orientation (5-8 swap the axes).
+    static func orientedSize(width: Int, height: Int, orientation: Int) -> (width: Int, height: Int) {
+        orientation >= 5 && orientation <= 8 ? (height, width) : (width, height)
+    }
+
+    /// Where source pixel (sx, sy) lands in the oriented output, as a pixel index
+    /// `base + sx * xStride + sy * yStride`. EXIF values: 1 none, 2 mirror horizontally,
+    /// 3 rotate 180, 4 mirror vertically, 5 transpose, 6 rotate 90 CW, 7 transverse, 8 rotate 90 CCW.
+    static func orientationMapping(width w: Int, height h: Int, orientation: Int) -> (base: Int, xStride: Int, yStride: Int) {
+        switch orientation {
+        case 2: return (w - 1, -1, w)
+        case 3: return (w * h - 1, -1, -w)
+        case 4: return ((h - 1) * w, 1, -w)
+        case 5: return (0, h, 1)
+        case 6: return (h - 1, h, -1)
+        case 7: return (w * h - 1, -h, -1)
+        case 8: return ((w - 1) * h, -h, 1)
+        default: return (0, 1, w)
         }
     }
 
     /// Applies the colour transform to a 16-bit big-endian RGBX Core Graphics buffer
     /// (8 bytes/pixel, the fourth component is padding) and returns 8-bit RGBX
-    /// (4 bytes/pixel). Rows are converted one at a time to bound memory; the 16-bit
-    /// result is rounded to 8 bits once, at the end. Internal so tests can check the
-    /// buffer handling without image encoding.
+    /// (4 bytes/pixel) with the EXIF orientation applied. Blocks of rows are converted in
+    /// parallel (the transform is thread-safe: no cache, no shared scratch); each 16-bit
+    /// result is rounded to 8 bits once. Internal so tests can check the buffer handling
+    /// without image encoding.
     static func convertRGBX16Pixels(
         _ sourcePixels: Data,
         width: Int,
         height: Int,
-        transform: ColorTransform
+        transform: ColorTransform,
+        orientation: Int = 1
     ) throws -> Data {
-        guard width > 0, height > 0,
-              width <= Int.max / 8,
-              height <= Int.max / (width * 8),
-              sourcePixels.count == width * height * 8 else {
+        try validateDimensions(width: width, height: height)
+        guard sourcePixels.count == width * height * 8 else {
             throw CorrectionError.bitmapContext
         }
 
+        let mapping = orientationMapping(width: width, height: height, orientation: orientation)
+        let rowsPerBlock = max(1, 65_536 / width)
+        let blockCount = (height + rowsPerBlock - 1) / rowsPerBlock
         var output = Data(count: width * height * 4)
-        var rowIn = [UInt16](repeating: 0, count: width * 3)
-        var rowOut = [UInt16](repeating: 0, count: width * 3)
         sourcePixels.withUnsafeBytes { sourceRaw in
-            let src = sourceRaw.bindMemory(to: UInt8.self)
             output.withUnsafeMutableBytes { outputRaw in
-                let dst = outputRaw.bindMemory(to: UInt8.self)
-                for y in 0..<height {
-                    let sourceBase = y * width * 8
-                    for x in 0..<width {
-                        for channel in 0..<3 {
-                            let offset = sourceBase + x * 8 + channel * 2
-                            rowIn[x * 3 + channel] = (UInt16(src[offset]) << 8) | UInt16(src[offset + 1])
+                guard let sourceBase = sourceRaw.baseAddress,
+                      let outputBase = outputRaw.baseAddress else { return }
+                let destination = outputBase.assumingMemoryBound(to: UInt8.self)
+                DispatchQueue.concurrentPerform(iterations: blockCount) { block in
+                    let firstRow = block * rowsPerBlock
+                    let rows = min(rowsPerBlock, height - firstRow)
+                    let pixelCount = rows * width
+                    let input = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount * 3)
+                    let converted = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount * 3)
+                    defer {
+                        input.deallocate()
+                        converted.deallocate()
+                    }
+                    for row in 0..<rows {
+                        let rowBase = sourceBase + (firstRow + row) * width * 8
+                        let target = input + row * width * 3
+                        for x in 0..<width {
+                            let offset = x * 8
+                            target[x * 3] = UInt16(bigEndian: rowBase.loadUnaligned(fromByteOffset: offset, as: UInt16.self))
+                            target[x * 3 + 1] = UInt16(bigEndian: rowBase.loadUnaligned(fromByteOffset: offset + 2, as: UInt16.self))
+                            target[x * 3 + 2] = UInt16(bigEndian: rowBase.loadUnaligned(fromByteOffset: offset + 4, as: UInt16.self))
                         }
                     }
-                    rowIn.withUnsafeBufferPointer { input in
-                        rowOut.withUnsafeMutableBufferPointer { converted in
-                            transform.apply16(input.baseAddress!, to: converted.baseAddress!, pixelCount: width)
+                    transform.apply16(input, to: converted, pixelCount: pixelCount)
+                    for row in 0..<rows {
+                        let sy = firstRow + row
+                        for x in 0..<width {
+                            let index = mapping.base + x * mapping.xStride + sy * mapping.yStride
+                            let pixel = destination + index * 4
+                            let value = converted + (row * width + x) * 3
+                            pixel[0] = UInt8((UInt32(value[0]) * 255 + 32767) / 65535)
+                            pixel[1] = UInt8((UInt32(value[1]) * 255 + 32767) / 65535)
+                            pixel[2] = UInt8((UInt32(value[2]) * 255 + 32767) / 65535)
+                            pixel[3] = 0
                         }
-                    }
-                    let destinationBase = y * width * 4
-                    for x in 0..<width {
-                        for channel in 0..<3 {
-                            let value = UInt32(rowOut[x * 3 + channel])
-                            dst[destinationBase + x * 4 + channel] = UInt8((value * 255 + 32767) / 65535)
-                        }
-                        dst[destinationBase + x * 4 + 3] = 0
                     }
                 }
             }
         }
         return output
-    }
-
-    /// Decodes the first image. Without an EXIF/TIFF orientation the full-precision decode is
-    /// used (keeps 16-bit data). When a rotation or mirroring is needed the thumbnail API is
-    /// used to apply it, which yields 8-bit data (ROADMAP M2: 16-bit oriented decode).
-    private static func makeOrientedImage(from source: CGImageSource) -> CGImage? {
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 1
-        let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 1
-        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-        if orientation == 1 {
-            return CGImageSourceCreateImageAtIndex(source, 0, nil)
-        }
-        return CGImageSourceCreateThumbnailAtIndex(
-            source,
-            0,
-            [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: max(width, height)
-            ] as CFDictionary
-        )
     }
 
     private static func makeSessionFolder() throws -> URL {
