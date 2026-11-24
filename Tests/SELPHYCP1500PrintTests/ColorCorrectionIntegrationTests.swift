@@ -184,6 +184,8 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
         }
         let src = try XCTUnwrap(CGImageSourceCreateWithURL(untagged as CFURL, nil))
         let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
+        let untaggedProps = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+        print("Untagged probe: profileName=\(String(describing: untaggedProps?[kCGImagePropertyProfileName]))")
         print("Untagged probe: untagged fixture csName=\(String(describing: image?.colorSpace?.name)) icc=\(image?.colorSpace?.copyICCData() != nil) tagged-size=\((try? Data(contentsOf: tagged).count) ?? 0) untagged-size=\((try? Data(contentsOf: untagged).count) ?? 0)")
 
         var centres: [[UInt8]] = []
@@ -194,6 +196,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             )
             defer { try? FileManager.default.removeItem(at: result.folder) }
             print("Untagged probe \(url == tagged ? "tagged" : "untagged"): assumed=\(result.assumedSRGBSources.count) converted=\(result.convertedSources.count)")
+            XCTAssertEqual(result.assumedSRGBSources.count, 1, "a JPEG without a profile must be reported as assumed sRGB")
             let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
             centres.append(rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels))
         }
@@ -380,6 +383,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
                 intent: .relativeColorimetric, blackPointCompensation: false
             )
             defer { try? FileManager.default.removeItem(at: result.folder) }
+            print("Profile probe \(url.lastPathComponent.prefix(14)): assumed=\(result.assumedSRGBSources.count)")
             let pixels = try rgbaPixels(from: try XCTUnwrap(result.files.first))
             centres.append(rgb(at: ((pixels.height / 2) * pixels.width + pixels.width / 2) * 4, in: pixels.pixels))
         }
