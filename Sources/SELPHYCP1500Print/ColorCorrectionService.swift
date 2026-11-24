@@ -47,19 +47,19 @@ enum ColorCorrectionService {
         var errorDescription: String? {
             switch self {
             case .unreadableImage(let url):
-                return "Impossibile leggere l'immagine: \(url.lastPathComponent)"
+                return trf("Unable to read the image: %@", url.lastPathComponent)
             case .unsupportedColorSpace(let url):
-                return "Spazio colore non supportato (sono accettati RGB, scala di grigi, CMYK, Lab): \(url.lastPathComponent)"
+                return trf("Unsupported colour space (RGB, greyscale, CMYK, Lab are accepted): %@", url.lastPathComponent)
             case .profileLoad(let detail):
-                return "Impossibile caricare il profilo ICC: \(detail)"
+                return trf("Unable to load the ICC profile: %@", detail)
             case .transformCreation(let detail):
-                return "Impossibile creare la trasformazione colore: \(detail)"
+                return trf("Unable to create the colour transform: %@", detail)
             case .bitmapContext:
-                return "Impossibile creare il buffer bitmap RGB."
+                return tr("Unable to create the RGB bitmap buffer.")
             case .imageEncoding(let url):
-                return "Impossibile generare l'immagine temporanea: \(url.lastPathComponent)"
+                return trf("Unable to generate the temporary image: %@", url.lastPathComponent)
             case .cancelled:
-                return "Conversione annullata."
+                return tr("Conversion cancelled.")
             }
         }
     }

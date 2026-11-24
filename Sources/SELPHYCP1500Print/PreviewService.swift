@@ -71,7 +71,7 @@ enum PreviewService {
     struct Display {
         let iccData: Data
         let colorSpace: CGColorSpace
-        var name: String = "profilo del monitor"
+        var name: String = tr("monitor profile")
 
         /// The profile of the screen the app window is on, or nil if it cannot be determined.
         @MainActor
@@ -81,7 +81,7 @@ enum PreviewService {
                   let icc = space.copyICCData() as Data?, !icc.isEmpty else {
                 return nil
             }
-            return Display(iccData: icc, colorSpace: space, name: screen?.colorSpace?.localizedName ?? "profilo del monitor")
+            return Display(iccData: icc, colorSpace: space, name: screen?.colorSpace?.localizedName ?? tr("monitor profile"))
         }
     }
 
@@ -192,7 +192,7 @@ enum PreviewService {
         var errorDescription: String? {
             switch self {
             case .displayProfile(let detail):
-                return "Profilo del monitor non utilizzabile: \(detail)"
+                return trf("Monitor profile unusable: %@", detail)
             }
         }
     }
@@ -299,11 +299,11 @@ enum PreviewService {
     static func describe(_ loaded: ColorCorrectionService.LoadedSource) -> String {
         switch loaded.interpretation {
         case .embeddedProfile:
-            return "profilo incorporato \(loaded.profileName ?? "RGB")"
+            return trf("embedded profile %@", loaded.profileName ?? "RGB")
         case .assumedSRGB:
-            return "RGB senza profilo utilizzabile, assunto sRGB"
+            return tr("RGB without a usable profile, assumed sRGB")
         case .convertedToSRGB:
-            return "\(loaded.colorModel ?? "non RGB"), convertito in sRGB"
+            return trf("%@, converted to sRGB", loaded.colorModel ?? tr("non-RGB"))
         }
     }
 

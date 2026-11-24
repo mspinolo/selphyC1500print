@@ -10,17 +10,17 @@ enum RenderingIntent: String, CaseIterable, Identifiable, Sendable, Hashable {
 
     var title: String {
         switch self {
-        case .perceptual: "Percettivo"
-        case .relativeColorimetric: "Colorimetrico relativo"
-        case .saturation: "Saturazione"
+        case .perceptual: tr("Perceptual")
+        case .relativeColorimetric: tr("Relative colorimetric")
+        case .saturation: tr("Saturation")
         }
     }
 
     var explanation: String {
         switch self {
-        case .perceptual: "Usa la mappatura percettiva del profilo."
-        case .relativeColorimetric: "Mantiene i colori in gamut e adatta il bianco del supporto."
-        case .saturation: "Privilegia la vivacità; utile soprattutto per grafica."
+        case .perceptual: tr("Uses the profile's perceptual mapping.")
+        case .relativeColorimetric: tr("Keeps in-gamut colours and adapts the media white.")
+        case .saturation: tr("Favours vividness; mostly useful for graphics.")
         }
     }
 }
@@ -33,8 +33,8 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Hashable {
 
     var title: String {
         switch self {
-        case .png: "PNG (senza perdita)"
-        case .jpeg: "JPEG (con perdita)"
+        case .png: tr("PNG (lossless)")
+        case .jpeg: tr("JPEG (lossy)")
         }
     }
 
@@ -47,8 +47,8 @@ enum OutputFormat: String, CaseIterable, Identifiable, Sendable, Hashable {
 
     var explanation: String {
         switch self {
-        case .png: "Consigliato: nessuna perdita dopo la correzione colore. File più grandi."
-        case .jpeg: "File più piccoli, ma la compressione con perdita viene applicata dopo la correzione colore."
+        case .png: tr("Recommended: no loss after colour correction. Larger files.")
+        case .jpeg: tr("Smaller files, but lossy compression is applied after colour correction.")
         }
     }
 }
@@ -71,6 +71,14 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(outputFormat.rawValue, forKey: Keys.outputFormat) }
     }
 
+    /// Interface language: English by default, Italian on request.
+    @Published var language: AppLanguage {
+        didSet {
+            Localizer.shared.language = language
+            defaults.set(language.rawValue, forKey: Keys.language)
+        }
+    }
+
     @Published private(set) var profileBookmark: Data? {
         didSet { defaults.set(profileBookmark, forKey: Keys.profileBookmark) }
     }
@@ -91,6 +99,7 @@ final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
 
     private enum Keys {
+        static let language = "language"
         static let printerName = "selectedPrinterName"
         static let renderingIntent = "renderingIntent"
         static let blackPointCompensation = "blackPointCompensation"
@@ -103,6 +112,9 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .english
+        self.language = language
+        Localizer.shared.language = language
         self.selectedPrinterName = defaults.string(forKey: Keys.printerName) ?? ""
         self.renderingIntent = RenderingIntent(rawValue: defaults.string(forKey: Keys.renderingIntent) ?? "") ?? .perceptual
         self.blackPointCompensation = defaults.object(forKey: Keys.blackPointCompensation) as? Bool ?? false

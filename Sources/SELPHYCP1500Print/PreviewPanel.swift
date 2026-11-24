@@ -9,13 +9,19 @@ struct PreviewPanel: View {
     let photos: [URL]
 
     enum Mode: String, CaseIterable, Identifiable {
-        case original = "Originale"
-        case uncorrected = "Senza correzione"
-        case corrected = "Con correzione"
-        case compare = "Confronto"
-        case heatMap = "Mappa ΔE"
+        case original, uncorrected, corrected, compare, heatMap
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .original: tr("Original")
+            case .uncorrected: tr("Without correction")
+            case .corrected: tr("With correction")
+            case .compare: tr("Compare")
+            case .heatMap: tr("ΔE map")
+            }
+        }
     }
 
     @State private var selectedPhoto: URL?
@@ -57,13 +63,13 @@ struct PreviewPanel: View {
     }
 
     var body: some View {
-        GroupBox("Anteprima di stampa (simulazione)") {
+        GroupBox(tr("Print preview (simulation)")) {
             VStack(alignment: .leading, spacing: 8) {
                 if photos.isEmpty {
-                    Text("Aggiungi una fotografia per vedere l'anteprima.")
+                    Text(tr("Add a photo to see the preview."))
                         .foregroundStyle(.secondary)
                 } else if settings.profileBookmark == nil {
-                    Text("Scegli il profilo ICC per vedere l'anteprima.")
+                    Text(tr("Choose the ICC profile to see the preview."))
                         .foregroundStyle(.secondary)
                 } else {
                     controls
@@ -94,9 +100,9 @@ struct PreviewPanel: View {
                     .frame(maxWidth: 320)
                 }
                 Spacer()
-                Picker("Vista", selection: $mode) {
+                Picker(tr("View"), selection: $mode) {
                     ForEach(Mode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -104,8 +110,8 @@ struct PreviewPanel: View {
                 .frame(maxWidth: 560)
             }
             HStack(spacing: 16) {
-                Toggle("Simula il bianco della carta", isOn: $simulatePaperWhite)
-                Toggle("Nero del monitor al posto del nero stampato", isOn: $previewBlackPointCompensation)
+                Toggle(tr("Simulate paper white"), isOn: $simulatePaperWhite)
+                Toggle(tr("Monitor black instead of printed black"), isOn: $previewBlackPointCompensation)
                     .disabled(simulatePaperWhite)
             }
             .font(.caption)
@@ -158,25 +164,25 @@ struct PreviewPanel: View {
     private var notes: some View {
         VStack(alignment: .leading, spacing: 3) {
             if mode == .heatMap {
-                Text("Trasparente: la stampa prevista è vicina all'originale (ΔE00 sotto 1). Giallo: circa 3. Rosso: 6 o più.")
+                Text(tr("Transparent: the predicted print is close to the original (ΔE00 below 1). Yellow: about 3. Red: 6 or more."))
                     .font(.caption)
             }
             if mode == .compare {
-                Text("A sinistra: stampa prevista senza correzione. A destra: con correzione. Trascina per spostare il divisore.")
+                Text(tr("Left: predicted print without correction. Right: with correction. Drag to move the divider."))
                     .font(.caption)
             }
             if let preview {
                 if preview.outOfGamutFraction > 0.005 {
-                    Text(String(format: "Circa il %.0f%% dei pixel ha colori stampabili fuori dalla gamma del monitor: nell'anteprima sono troncati.", preview.outOfGamutFraction * 100))
+                    Text(trf("About %.0f%% of pixels have printable colours outside the monitor's gamut: they are clipped in the preview.", preview.outOfGamutFraction * 100))
                         .font(.caption)
                 }
                 if preview.usedSRGBFallback {
-                    Text("Profilo del monitor non utilizzabile: l'anteprima usa sRGB.")
+                    Text(tr("Monitor profile unusable: the preview uses sRGB."))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
-            Text("Simulazione calcolata dal profilo della stampante: non è una prova di stampa e non è stata validata con stampe fisiche.")
+            Text(tr("Simulation computed from the printer profile: it is not a proof and has not been validated with physical prints."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -212,7 +218,7 @@ struct PreviewPanel: View {
         } catch {
             if Task.isCancelled { return }
             preview = nil
-            errorMessage = "Anteprima non disponibile: \(error.localizedDescription)"
+            errorMessage = trf("Preview unavailable: %@", error.localizedDescription)
         }
     }
 }
@@ -273,16 +279,16 @@ private struct ColorDetails: View {
     @State private var expanded = false
 
     var body: some View {
-        DisclosureGroup("Dettagli colore", isExpanded: $expanded) {
+        DisclosureGroup(tr("Colour details"), isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    row("Originale", "numeri sRGB della foto (\(preview.sourceDescription)).")
-                    row("Senza correzione", "gli stessi numeri inviati alla stampante, mostrati col modello del profilo e convertiti nel profilo del monitor (\(preview.displayName)).")
-                    row("Con correzione", "i numeri corretti dal profilo, mostrati allo stesso modo. Il file esportato li etichetta sRGB.")
+                    row(tr("Original"), trf("sRGB numbers of the photo (%@).", preview.sourceDescription))
+                    row(tr("Without correction"), trf("the same numbers sent to the printer, shown with the profile's model and converted to the monitor profile (%@).", preview.displayName))
+                    row(tr("With correction"), tr("the numbers corrected by the profile, shown the same way. The exported file tags them sRGB."))
                 }
                 Divider()
                 checks
-                Text("Stime dal modello del profilo, misurate rispetto alla foto letta come sRGB: da confermare con una stampa.")
+                Text(tr("Estimates from the profile's model, measured against the photo read as sRGB: to be confirmed with a print."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -299,14 +305,14 @@ private struct ColorDetails: View {
     private var checks: some View {
         let stats = preview.stats
         VStack(alignment: .leading, spacing: 3) {
-            Text(String(format: "Scostamento previsto dall'originale: medio %.1f, 95° percentile %.1f (ΔE00).", stats.meanDeltaE, stats.p95DeltaE))
-            Text(String(format: "Colori non riproducibili (ΔE00 sopra 3): %.0f%% dei pixel.", stats.shareNotReproducible * 100))
-            Text(String(format: "Ombre più scure del tono più scuro riprodotto (L* %.0f): %.0f%% dei pixel — vengono unite o compresse.", stats.darkestToneL, stats.shareBelowDarkestTone * 100))
+            Text(trf("Predicted deviation from the original: mean %.1f, 95th percentile %.1f (ΔE00).", stats.meanDeltaE, stats.p95DeltaE))
+            Text(trf("Non-reproducible colours (ΔE00 above 3): %.0f%% of pixels.", stats.shareNotReproducible * 100))
+            Text(trf("Shadows darker than the darkest reproduced tone (L* %.0f): %.0f%% of pixels — they are merged or compressed.", stats.darkestToneL, stats.shareBelowDarkestTone * 100))
             if stats.isBlackAndWhite {
                 if let chroma = stats.neutralP95Chroma {
-                    Text(String(format: "Foto in bianco e nero: tinta residua prevista nei toni riproducibili C* %.1f (0 = neutro).", chroma))
+                    Text(trf("Black-and-white photo: predicted residual tint in reproducible tones C* %.1f (0 = neutral).", chroma))
                 } else {
-                    Text("Foto in bianco e nero: nessun tono neutro riproducibile da valutare.")
+                    Text(tr("Black-and-white photo: no reproducible neutral tone to evaluate."))
                 }
             }
         }

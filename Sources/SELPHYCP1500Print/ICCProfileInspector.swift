@@ -26,9 +26,9 @@ struct ICCProfileReport {
 
     var summary: String {
         guard isExpectedPrinterProfile else {
-            return "Profilo caricato, ma classe/spazio colore non corrispondono a un profilo stampante RGB con PCS Lab."
+            return tr("Profile loaded, but class/colour space do not match an RGB printer profile with Lab PCS.")
         }
-        return "Profilo stampante RGB / Lab valido. Tabelle disponibili: " +
+        return tr("Valid RGB / Lab printer profile. Available tables: ") +
             availableIntents.map(\.title).joined(separator: ", ")
     }
 }
@@ -42,10 +42,10 @@ enum ICCProfileInspector {
 
         var errorDescription: String? {
             switch self {
-            case .tooShort: "Il file è troppo corto per contenere un profilo ICC."
-            case .invalidDeclaredSize: "La dimensione dichiarata nell'intestazione ICC non coincide con quella del file."
-            case .missingSignature: "Firma ICC 'acsp' non trovata."
-            case .invalidTagTable: "La tabella dei tag ICC è incompleta o contiene offset/dimensioni non validi."
+            case .tooShort: tr("The file is too short to contain an ICC profile.")
+            case .invalidDeclaredSize: tr("The size declared in the ICC header does not match the file's.")
+            case .missingSignature: tr("ICC signature 'acsp' not found.")
+            case .invalidTagTable: tr("The ICC tag table is incomplete or contains invalid offsets/sizes.")
             }
         }
     }

@@ -7,6 +7,7 @@ concurrency:
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -49,18 +50,22 @@ jobs:
       - name: Verify bundle, signature and entitlements
         run: |
           app="$RUNNER_TEMP/app/SELPHY CP1500 Print.app"
-          plutil -lint "$app/Contents/Info.plist"
-          codesign --verify --strict --deep "$app"
-          ent=$(codesign -d --entitlements - --xml "$app" 2>/dev/null || codesign -d --entitlements :- "$app")
-          for k in com.apple.security.app-sandbox com.apple.security.files.user-selected.read-write com.apple.security.files.bookmarks.app-scope; do
-            echo "$ent" | grep -q "$k" || { echo "::error::missing entitlement $k"; exit 1; }
-          done
-          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/SELPHY-CP1500-Print.zip"
+          scripts/verify-app.sh "$app"
+          version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist")
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the app version $version"; exit 1
+          fi
+          zip="$RUNNER_TEMP/SELPHY-CP1500-Print-$version-macOS.zip"
+          ditto -c -k --keepParent "$app" "$zip"
+          (cd "$RUNNER_TEMP" && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
+          echo "ZIP_NAME=$(basename "$zip")" >> "$GITHUB_ENV"
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
           name: SELPHY-CP1500-Print-app
-          path: ${{ runner.temp }}/SELPHY-CP1500-Print.zip
+          path: |
+            ${{ runner.temp }}/${{ env.ZIP_NAME }}
+            ${{ runner.temp }}/${{ env.ZIP_NAME }}.sha256
       - name: Publish test diagnostics as annotations
         if: always()
         run: |
@@ -70,3 +75,32 @@ jobs:
           # Annotations are truncated at 4096 characters: put the verdict first.
           body=$( { grep -E "Executed [0-9]+ tests" "$log" | tail -1; grep -E "error:|End-to-end|JPEG penalty|Preview check|Test Case .* failed" "$log" | head -40; } | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
           echo "::notice title=swift test summary::${body}"
+
+  release:
+    # Publishes a GitHub release when a v* tag is pushed, after build and tests have passed.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [core-linux, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Download app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: SELPHY-CP1500-Print-app
+          path: dist
+      - name: Extract release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \\[/ {on=0} on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::no changelog entry for $version"; exit 1; }
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: notes.md
+          # 0.x releases are pre-releases: not yet fully verified (see Documentation/ROADMAP.md).
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          files: dist/*

@@ -33,7 +33,13 @@ struct ContentView: View {
     @State private var isPreparing = false
     @StateObject private var progress = ConversionProgress()
     @State private var conversionWork: Task<ColorCorrectionService.Result, Error>?
-    @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie (JPEG, JPEG XL, PNG, TIFF)."
+    /// nil = the initial hint, so that it follows the selected language.
+    @State private var statusOverride: String?
+
+    private var statusMessage: String {
+        get { statusOverride ?? tr("Select an ICC profile and one or more photos (JPEG, JPEG XL, PNG, TIFF).") }
+        nonmutating set { statusOverride = newValue }
+    }
 
     /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile. The
     /// version is known once a profile has been inspected; the Farbenwerk profile is v4.
@@ -52,29 +58,35 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("SELPHY CP1500 Print")
                         .font(.largeTitle.weight(.semibold))
-                    Text("Preparazione e pre-correzione colore")
+                    Text(tr("Colour preparation and pre-correction"))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Picker(tr("Language"), selection: $settings.language) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.nativeName).tag(language)
+                    }
+                }
+                .frame(width: 190)
                 Image(systemName: "printer")
                     .font(.system(size: 34))
                     .foregroundStyle(.secondary)
             }
 
-            GroupBox("Profilo ICC Farbenwerk") {
+            GroupBox(tr("Farbenwerk ICC profile")) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(settings.profileDisplayName.isEmpty ? "Nessun profilo selezionato" : settings.profileDisplayName)
+                            Text(settings.profileDisplayName.isEmpty ? tr("No profile selected") : settings.profileDisplayName)
                                 .lineLimit(1)
-                            Text("Il percorso viene ricordato in modo sicuro tra gli avvii.")
+                            Text(tr("The path is remembered securely between launches."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Scegli profilo…") { showingProfilePicker = true }
+                        Button(tr("Choose profile…")) { showingProfilePicker = true }
                         if !settings.profileDisplayName.isEmpty {
-                            Button("Rimuovi", role: .destructive) {
+                            Button(tr("Remove"), role: .destructive) {
                                 settings.clearProfile()
                                 profileReport = nil
                                 profileError = nil
@@ -96,14 +108,14 @@ struct ContentView: View {
                 .padding(.vertical, 4)
             }
 
-            GroupBox("Gestione colore") {
+            GroupBox(tr("Colour management")) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Picker("Intento di rendering", selection: $settings.renderingIntent) {
+                    Picker(tr("Rendering intent"), selection: $settings.renderingIntent) {
                         ForEach(RenderingIntent.allCases) { intent in
                             Text(intent.title).tag(intent)
                         }
                     }
-                    Picker("Formato dei file generati", selection: $settings.outputFormat) {
+                    Picker(tr("Output file format"), selection: $settings.outputFormat) {
                         ForEach(OutputFormat.allCases) { format in
                             Text(format.title).tag(format)
                         }
@@ -112,28 +124,28 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Toggle(
-                        "Compensazione del punto nero (BPC)",
+                        tr("Black point compensation (BPC)"),
                         isOn: blackPointCompensationForced ? .constant(true) : $settings.blackPointCompensation
                     )
                     .disabled(blackPointCompensationForced)
                     if blackPointCompensationForced {
-                        Text("Con un profilo ICC v4 la compensazione del punto nero è sempre applicata negli intenti Percettivo e Saturazione (regola ICC); l'opzione vale solo per il Colorimetrico relativo.")
+                        Text(tr("With an ICC v4 profile, black point compensation is always applied for the Perceptual and Saturation intents (ICC rule); the option only matters for Relative colorimetric."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("La conversione usa il motore colore integrato (LittleCMS). In questa fase è una pre-correzione sperimentale: l'immagine risultante viene etichettata sRGB per il successivo trattamento interno della SELPHY.")
+                    Text(tr("Conversion uses the built-in colour engine (LittleCMS). At this stage it is an experimental pre-correction: the resulting image is tagged sRGB for the SELPHY's own subsequent processing."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
 
-            GroupBox("Fotografie originali") {
+            GroupBox(tr("Original photos")) {
                 HStack {
-                    Text(selectedPhotos.isEmpty ? "Nessuna fotografia selezionata" : "\(selectedPhotos.count) fotografie selezionate")
+                    Text(selectedPhotos.isEmpty ? tr("No photos selected") : trn(selectedPhotos.count, one: "1 photo selected", other: "%d photos selected"))
                     Spacer()
-                    Button("Aggiungi immagini…") { showingPhotoPicker = true }
-                    Button("Svuota", role: .destructive) {
+                    Button(tr("Add images…")) { showingPhotoPicker = true }
+                    Button(tr("Clear"), role: .destructive) {
                         selectedPhotos.removeAll()
                         generatedCopies.removeAll()
                         generatedFolder = nil
@@ -147,7 +159,7 @@ struct ContentView: View {
                     }
                     .frame(minHeight: 90, maxHeight: 150)
                 }
-                Text("Gli originali vengono soltanto letti. La conversione crea nuove immagini temporanee.")
+                Text(tr("Originals are only read. Conversion creates new temporary images."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -155,52 +167,52 @@ struct ContentView: View {
             PreviewPanel(photos: selectedPhotos)
 
             if !generatedCopies.isEmpty {
-                GroupBox("Copie di prova generate") {
+                GroupBox(tr("Generated test copies")) {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(generatedCopies, id: \.path) { url in
                             Label(url.lastPathComponent, systemImage: "doc.richtext")
                                 .lineLimit(1)
                         }
                         if !generatedSummary.isEmpty {
-                            Text("Generate con: \(generatedSummary)")
+                            Text(trf("Generated with: %@", generatedSummary))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         HStack {
-                            Text("Queste copie sono temporanee e vengono rimosse dopo 24 ore. Per conservarle, salvale in una cartella: i file esistenti non vengono mai sovrascritti né cancellati.")
+                            Text(tr("These copies are temporary and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Button("Mostra nel Finder") {
+                            Button(tr("Show in Finder")) {
                                 if let generatedFolder {
                                     NSWorkspace.shared.open(generatedFolder)
                                 }
                             }
                             if settings.saveFolderBookmark != nil {
-                                Button("Salva in un'altra cartella…") { showingSaveFolderPicker = true }
-                                Button("Salva in \(settings.saveFolderDisplayName)") { saveToRememberedFolder() }
+                                Button(tr("Save to another folder…")) { showingSaveFolderPicker = true }
+                                Button(trf("Save to %@", settings.saveFolderDisplayName)) { saveToRememberedFolder() }
                                     .buttonStyle(.borderedProminent)
                             } else {
-                                Button("Salva in una cartella…") { showingSaveFolderPicker = true }
+                                Button(tr("Save to a folder…")) { showingSaveFolderPicker = true }
                                     .buttonStyle(.borderedProminent)
                             }
                         }
                         if settings.saveFolderBookmark != nil {
                             HStack {
-                                Text("Cartella di salvataggio ricordata: \(settings.saveFolderDisplayName)")
+                                Text(trf("Remembered save folder: %@", settings.saveFolderDisplayName))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Button("Dimentica") { settings.clearSaveFolder() }
+                                Button(tr("Forget")) { settings.clearSaveFolder() }
                                     .buttonStyle(.link)
                                     .font(.caption)
                             }
                         }
                         if let savedFolder {
                             HStack {
-                                Label("Salvate in \(savedFolder.lastPathComponent)", systemImage: "checkmark.circle")
+                                Label(trf("Saved to %@", savedFolder.lastPathComponent), systemImage: "checkmark.circle")
                                     .font(.caption)
                                     .foregroundStyle(.green)
-                                Button("Apri la cartella") { NSWorkspace.shared.open(savedFolder) }
+                                Button(tr("Open folder")) { NSWorkspace.shared.open(savedFolder) }
                                     .buttonStyle(.link)
                                     .font(.caption)
                             }
@@ -215,7 +227,7 @@ struct ContentView: View {
                     Text(statusMessage)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Text("La stampa diretta non è ancora abilitata.")
+                    Text(tr("Direct printing is not enabled yet."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -227,11 +239,11 @@ struct ContentView: View {
                         Text("\(progress.completed)/\(progress.total)")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                        Button("Annulla") { conversionWork?.cancel() }
+                        Button(tr("Cancel")) { conversionWork?.cancel() }
                             .keyboardShortcut(.cancelAction)
                     }
                 } else {
-                    Button("Genera copie di prova") { prepareCopies() }
+                    Button(tr("Generate test copies")) { prepareCopies() }
                         .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
                         .keyboardShortcut(.defaultAction)
                 }
@@ -267,7 +279,7 @@ struct ContentView: View {
             // Remember the folder only once it has been used successfully.
             if savedFolder == folder { try? settings.chooseSaveFolder(at: folder) }
         case .failure(let error):
-            statusMessage = "Selezione cartella non riuscita: \(error.localizedDescription)"
+            statusMessage = trf("Folder selection failed: %@", error.localizedDescription)
         }
     }
 
@@ -281,7 +293,7 @@ struct ContentView: View {
         } catch {
             // The folder was moved or deleted: ask again.
             settings.clearSaveFolder()
-            statusMessage = "La cartella di salvataggio non è più raggiungibile: sceglila di nuovo."
+            statusMessage = tr("The save folder is no longer reachable: choose it again.")
             showingSaveFolderPicker = true
         }
     }
@@ -290,9 +302,9 @@ struct ContentView: View {
         do {
             let saved = try ExportService.save(copies: generatedCopies, to: folder)
             savedFolder = folder
-            statusMessage = "Salvate \(saved.count) copie in \(folder.lastPathComponent). Gli originali e i file già presenti non sono stati modificati."
+            statusMessage = trn(saved.count, one: "Saved 1 copy to %@. Originals and existing files were not modified.", other: "Saved %d copies to %@. Originals and existing files were not modified.", folder.lastPathComponent)
         } catch {
-            statusMessage = "Salvataggio non riuscito: \(error.localizedDescription)"
+            statusMessage = trf("Saving failed: %@", error.localizedDescription)
         }
     }
 
@@ -305,7 +317,7 @@ struct ContentView: View {
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
             profileReport = try ICCProfileInspector.inspect(url: url)
         } catch {
-            profileError = "Il profilo ricordato non è più leggibile: \(error.localizedDescription)"
+            profileError = trf("The remembered profile can no longer be read: %@", error.localizedDescription)
         }
     }
 
@@ -313,11 +325,11 @@ struct ContentView: View {
         switch result {
         case .success(let urls):
             selectedPhotos.append(contentsOf: urls.filter { !selectedPhotos.contains($0) })
-            statusMessage = "\(selectedPhotos.count) fotografie in coda."
+            statusMessage = trn(selectedPhotos.count, one: "1 photo queued.", other: "%d photos queued.")
             generatedCopies.removeAll()
             generatedFolder = nil
         case .failure(let error):
-            statusMessage = "Selezione fotografie non riuscita: \(error.localizedDescription)"
+            statusMessage = trf("Photo selection failed: %@", error.localizedDescription)
         }
     }
 
@@ -333,22 +345,22 @@ struct ContentView: View {
                 profileReport = report
                 profileError = nil
                 statusMessage = report.isExpectedPrinterProfile
-                    ? "Profilo ICC caricato e struttura verificata."
-                    : "Profilo caricato; controllare la classe e gli spazi colore."
+                    ? tr("ICC profile loaded and structure verified.")
+                    : tr("Profile loaded; check the class and colour spaces.")
             } catch {
                 profileReport = nil
                 profileError = error.localizedDescription
-                statusMessage = "Impossibile verificare il profilo: \(error.localizedDescription)"
+                statusMessage = trf("Unable to verify the profile: %@", error.localizedDescription)
             }
         case .failure(let error):
-            statusMessage = "Selezione profilo non riuscita: \(error.localizedDescription)"
+            statusMessage = trf("Profile selection failed: %@", error.localizedDescription)
         }
     }
 
     private func prepareCopies() {
         do {
             guard let profileURL = try settings.resolveProfileURL() else {
-                statusMessage = "Seleziona prima il profilo ICC Farbenwerk."
+                statusMessage = tr("First select the Farbenwerk ICC profile.")
                 return
             }
 
@@ -357,7 +369,7 @@ struct ContentView: View {
             let bpc = settings.blackPointCompensation
             let format = settings.outputFormat
             isPreparing = true
-            statusMessage = "Conversione colore in corso…"
+            statusMessage = tr("Colour conversion in progress…")
 
             progress.update(completed: 0, total: photoURLs.count)
             let batchProgress = progress
@@ -390,25 +402,25 @@ struct ContentView: View {
                     generatedCopies = result.files
                     generatedFolder = result.folder
                     savedFolder = nil
-                    generatedSummary = "\(intent.title) · BPC \(result.effectiveBlackPointCompensation ? "sì" : "no") · \(format.title)"
-                    var message = "Generate \(result.files.count) copie temporanee. Non sono state inviate alla stampante."
+                    generatedSummary = trf("%@ · BPC %@ · %@", intent.title, result.effectiveBlackPointCompensation ? tr("yes") : tr("no"), format.title)
+                    var message = trn(result.files.count, one: "Generated 1 temporary copy. It was not sent to the printer.", other: "Generated %d temporary copies. They were not sent to the printer.")
                     if !result.assumedSRGBSources.isEmpty {
-                        message += " Senza profilo incorporato (assunto sRGB): \(result.assumedSRGBSources.map(\.lastPathComponent).joined(separator: ", "))."
+                        message += trf(" No embedded profile (assumed sRGB): %@.", result.assumedSRGBSources.map(\.lastPathComponent).joined(separator: ", "))
                     }
                     if !result.convertedSources.isEmpty {
-                        message += " Convertite prima in sRGB (grigi/CMYK/Lab): \(result.convertedSources.map(\.lastPathComponent).joined(separator: ", "))."
+                        message += trf(" Converted to sRGB first (grey/CMYK/Lab): %@.", result.convertedSources.map(\.lastPathComponent).joined(separator: ", "))
                     }
                     statusMessage = message
                 } catch ColorCorrectionService.CorrectionError.cancelled {
-                    statusMessage = "Conversione annullata. Nessun file è stato creato."
+                    statusMessage = tr("Conversion cancelled. No files were created.")
                 } catch {
-                    statusMessage = "Conversione non riuscita: \(error.localizedDescription)"
+                    statusMessage = trf("Conversion failed: %@", error.localizedDescription)
                 }
                 conversionWork = nil
                 isPreparing = false
             }
         } catch {
-            statusMessage = "Impossibile accedere al profilo ICC: \(error.localizedDescription)"
+            statusMessage = trf("Unable to access the ICC profile: %@", error.localizedDescription)
         }
     }
 }

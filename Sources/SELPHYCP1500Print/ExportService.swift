@@ -13,9 +13,9 @@ enum ExportService {
         var errorDescription: String? {
             switch self {
             case .notAFolder(let url):
-                return "La destinazione non è una cartella utilizzabile: \(url.lastPathComponent)"
+                return trf("The destination is not a usable folder: %@", url.lastPathComponent)
             case .copyFailed(let url, let detail):
-                return "Impossibile salvare \(url.lastPathComponent): \(detail)"
+                return trf("Unable to save %@: %@", url.lastPathComponent, detail)
             }
         }
     }
