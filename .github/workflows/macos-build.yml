@@ -12,6 +12,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  core-linux:
+    # Fast gate for the portable colour core (vendored LittleCMS, no macOS APIs).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Run core tests
+        run: ctest --test-dir build --output-on-failure
+
   build:
     runs-on: xcode-27
     steps:
@@ -19,8 +32,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Show Swift toolchain
         run: swift --version
-      - name: Install LittleCMS test dependency
-        run: brew install little-cms2 pkgconf
       - name: Build package
         run: swift build -v
       - name: Run automated tests
@@ -36,5 +47,6 @@ jobs:
           log="$RUNNER_TEMP/test.log"
           [ -f "$log" ] || exit 0
           # Annotations are readable through the public API; raw logs are not.
-          body=$(grep -E "ICC numeric comparison|LCMS|error:|Executed [0-9]+ tests|Test Case .* failed" "$log" | head -80 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          # Annotations are truncated at 4096 characters: put the verdict first.
+          body=$( { grep -E "Executed [0-9]+ tests" "$log" | tail -1; grep -E "error:|End-to-end|Test Case .* failed" "$log" | head -40; } | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
           echo "::notice title=swift test summary::${body}"

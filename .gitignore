@@ -10,3 +10,6 @@ xcuserdata/
 *.icc
 *.icm
 !/ICC-Profile165-CP1500.icc
+
+# CMake build trees
+build/

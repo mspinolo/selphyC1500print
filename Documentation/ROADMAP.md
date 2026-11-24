@@ -8,8 +8,8 @@ A native macOS utility that pre-corrects photos for the Canon SELPHY CP1500 usin
 
 ## Where the project actually stands (2026-11-24)
 
-- Implemented: SwiftUI shell, ICC header/tag inspector, ColorSync pre-correction (source RGB -> PCS -> printer B2A, result tagged sRGB), batch export to a temporary folder, read-only treatment of originals.
-- Tested: CI builds and runs 18 tests. The only failures (5 assertions) were in `testColorSyncMatchesIndependentLittleCMSReference` (raw RGB codes, ColorSync vs LittleCMS); they are now tracked as strict expected failures with unchanged thresholds (see Findings).
+- Implemented: SwiftUI shell, ICC header/tag inspector, pre-correction in the portable LittleCMS-based colour core (source RGB -> PCS -> printer B2A, 16-bit internally, result tagged sRGB), batch export to a temporary folder, read-only treatment of originals.
+- Tested: portable core tests (CMake/ctest, Linux CI) and macOS integration tests. The earlier ColorSync-vs-LittleCMS raw-code comparison is retired (see Findings).
 - Validated: nothing yet. The owner cannot run physical prints for now and relies on the vendor's profile and printer-setting instructions. The premise "pre-corrected sRGB-tagged output prints better" is therefore *accepted on trust*, and every release note must say so.
 - The Farbenwerk profile is ICC v4.3, committed at the repository root by explicit owner decision (not reopened). README, VALIDATION_PLAN and `.gitignore` now say so, and CI uses the committed copy.
 
@@ -42,12 +42,17 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 
 **Exit:** green CI on a clean checkout; docs match reality.
 
-### M1 - Colour engine decision
-- [ ] Build the DeltaE00 harness (Lab via printer A2B, in-gamut and out-of-gamut reported separately).
-- [ ] Resolve the BPC discrepancy by data: per-patch dump, v4 forced-BPC hypothesis, which entry of the ColorSync sequence carries BPC.
-- [ ] Decide ColorSync vs LittleCMS using the gate in Decision 3; document the choice.
+### M1 - Colour engine decision (done, pending CI on macOS)
+- [x] DeltaE2000 harness: printer A2B forward model vs intended Lab (`selphy_printer_predict_lab`, `selphy_source_to_lab`, `selphy_delta_e2000`).
+- [x] BPC discrepancy resolved from the LittleCMS source (`cmscnvrt.c`): BPC entry `i` acts between profile `i-1` and `i`, so only the printer entry matters in a two-profile chain; BPC is forced for ICC v4 profiles with perceptual/saturation, never applied for absolute colorimetric. The UI toggle is therefore disabled where it has no effect.
+- [x] Decision: **LittleCMS is the production engine** (vendored lcms2.20, MIT). ColorSync is removed: its BPC cannot be specified (destination entry ignored, source entry matches neither LittleCMS setting).
+- [x] Portable core `SELPHYColorCore` (C) with its own Linux/CMake test suite; Swift is a thin shell. Mutation-checked: injected defects (BPC always on, wrong intent table, wrong rounding) are detected.
+- [x] Real defect found and fixed by the new tests: a truncated printer profile was silently accepted (LittleCMS reads lazily); the ICC declared size is now validated.
+- [ ] macOS CI green for the Swift shell (first build of the vendored C targets under SwiftPM).
 
-**Exit:** one production engine, documented BPC semantics, DeltaE00 tolerances recorded.
+**Evidence (core tests, real profile, 32-patch sRGB chart, relative colorimetric, BPC off):** optimised vs exact pipeline mean 0.03 / max 0.20 DeltaE2000; through the profile's own model the correction reduces the mean deviation from 9.25 to 3.00 DeltaE2000, neutral steps (L* >= 27) and skin tones land within 0.35, no patch is worse than uncorrected. The remaining error is outside the printer gamut (saturated primaries, about 10 DeltaE2000) or near black (the printer's black is L* 17.9, relative; 2.8 on the v4 perceptual scale). This is a statement about the model, not about prints.
+
+**Exit:** one production engine, documented BPC semantics, DeltaE00 tolerances recorded in the tests.
 
 ### M2 - Pipeline hardening
 - [ ] 16-bit internal processing with a single final rounding; lossless (or 4:4:4, q=100) output; correct output resolution metadata.

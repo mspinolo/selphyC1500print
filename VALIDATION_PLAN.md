@@ -4,13 +4,13 @@ This document separates software correctness from actual printer-color accuracy.
 
 ## 1. Automated software checks
 
-Install the test-only LittleCMS dependency first, then run on macOS with the project toolchain:
+Portable core (Linux or macOS), no dependencies beyond a C compiler and CMake:
 
 ```sh
-brew install little-cms2 pkgconf
+cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure
 ```
 
-
+Whole application on macOS with the project toolchain:
 
 ```sh
 swift test
@@ -29,8 +29,8 @@ The suite currently checks:
 - ICC header size, signature, class, RGB device space and Lab PCS.
 - ICC tag-table bounds and paired A2B/B2A intent availability.
 - Rejection of malformed ICC data.
-- Real-profile ColorSync conversion for perceptual, relative-colorimetric and saturation intents, each with BPC off and on.
-- Numerical comparison against an independent LittleCMS transform for a 32-patch sRGB chart, across all three intents and both BPC states. The current comparison samples patch centers to reduce JPEG edge artifacts.
+- Real-profile conversion for perceptual, relative-colorimetric and saturation intents, each with BPC off and on (core tests and macOS integration tests).
+- Closed-loop check against the printer profile's own forward model (A2B): the corrected values must reproduce the intended Lab of neutral steps and skin tones within DeltaE2000 limits, never be worse than sending the values uncorrected, and at least halve the chart's mean deviation. Optimised and exact LittleCMS pipelines must agree to well below 1 DeltaE2000.
 - Output JPEG decoding, RGB color model, sRGB tag, dimensions and source-file byte-for-byte preservation.
 - Failure behavior for an invalid printer profile.
 
@@ -50,7 +50,7 @@ The following cases should be added or manually exercised as the implementation 
 | File safety | Several inputs, one invalid input | Fail atomically and remove the partial session |
 | File safety | Two same-named files in different folders | Unique output names; no overwrite |
 | ICC handling | Missing/corrupt/incompatible profile | Clear error, no output files |
-| ColorSync | Each intent and BPC state | Successful transform; distinct settings actually reach ColorSync |
+| Colour core | Each intent and BPC state | Successful transform; intents give distinct output; BPC follows the ICC rules (forced for v4 perceptual/saturation) |
 | Output | Re-open generated JPEG | Decodable RGB JPEG with embedded sRGB profile |
 | Temporary files | Conversion failure | Partial output folder removed |
 | Temporary files | Old abandoned session | Removed only on next conversion, according to retention policy |
@@ -59,7 +59,7 @@ The current integration test is a first end-to-end smoke test, not yet the compl
 
 ## 3. Validate the transform direction and numeric behavior
 
-A LittleCMS test oracle is now included. It independently transforms the sampled sRGB chart pixels through the same printer profile and compares those expected device RGB values with decoded pixels from the ColorSync-generated JPEG. This checks transform direction, intent selection, BPC propagation and channel/buffer handling. The current acceptance tolerance is mean absolute channel difference <= 3 code values and maximum <= 10 code values at patch centers. If this comparison fails, do not widen the tolerance without first investigating profile intent handling, BPC semantics, pixel formats and JPEG encoding.
+The conversion engine is LittleCMS (vendored). Earlier work compared it with ColorSync on raw RGB codes; that comparison is retired because ColorSync ignores BPC on the destination entry and applies it on the source entry with semantics that match neither LittleCMS setting (see the findings in `Documentation/ROADMAP.md`). Accuracy is now judged in DeltaE2000 through the printer profile's own A2B model: the predicted Lab of the corrected values against the intended Lab of the source. Tolerances live next to the tests (`Tests/CoreTests/core_tests.c`) with their justification.
 
 The Farbenwerk file is a printer-class RGB/Lab profile with A2B and B2A tables for three intents. The intended compensation path is:
 
@@ -70,10 +70,10 @@ The Farbenwerk file is a printer-class RGB/Lab profile with A2B and B2A tables f
 
 This is a deliberate pre-compensation strategy for the printer's fixed internal pipeline, not the usual workflow of sending a printer-profile-tagged file to a fully color-managed printer driver. It is only valid if the printer's internal processing and the driver path behave as assumed.
 
-For a stronger numerical validation, use a known RGB test chart and independently calculate expected PCS and B2A values with a second ICC engine (for example LittleCMS used only as a test oracle, not as the app's production engine). Compare the app's output pixel values to that independent reference within a documented tolerance. Do not use the app's own ColorSync code as its only oracle.
+For a stronger numerical validation, use a known RGB test chart and independently calculate expected PCS and B2A values with a second ICC engine (for example a second CMM such as ColorSync, used only as a cross-check). Compare in DeltaE2000 within a documented tolerance, never in raw code values alone.
 
 Also verify that:
-- the selected intent is applied to both the source-to-PCS and PCS-to-device legs as intended by ColorSync;
+- the selected intent is applied to both the source-to-PCS and PCS-to-device legs;
 - BPC is passed only where supported and its effect is measured;
 - the pixel buffer's byte order, channel order, row stride and alpha-skip layout are correct;
 - the JPEG output's embedded profile describes the output numbers as sRGB;
@@ -94,7 +94,7 @@ Use a second chart with photographic content (portrait/skin, foliage, sky, neutr
 
 For every chart, prepare:
 - A: original, uncorrected JPEG;
-- B: ColorSync-pre-corrected JPEG.
+- B: pre-corrected JPEG.
 
 Print A and B through the exact same macOS/SELPHY path, on Canon RP-108 paper, with identical driver/printer settings. Disable automatic photo enhancement or scene correction wherever the driver or printer exposes such controls. Do not change any setting between A and B. Randomize print order and make at least three repeats of each condition to expose print-to-print variation.
 

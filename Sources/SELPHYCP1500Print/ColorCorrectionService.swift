@@ -1,17 +1,18 @@
 import Foundation
 import AppKit
-import ColorSync
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import SELPHYColorCore
 
 /// Experimental pre-correction for the SELPHY's fixed internal color pipeline.
 ///
 /// The Farbenwerk profile describes the complete printer response. We convert
 /// source-image RGB through PCS into the profile's RGB input values, then tag
 /// those numeric values as sRGB for the SELPHY's normal fixed processing path.
-/// This workflow must be validated with physical prints before being used
-/// for production output.
+/// The conversion itself runs in the portable LittleCMS-based colour core
+/// (`SELPHYColorCore`). This workflow is trusted on the vendor's documentation
+/// and has not been validated with physical prints.
 enum ColorCorrectionService {
     struct Result {
         let files: [URL]
@@ -22,9 +23,7 @@ enum ColorCorrectionService {
         case unreadableImage(URL)
         case unsupportedColorSpace(URL)
         case profileLoad(String)
-        case transformCreation
-        case transformFailed(URL)
-        case pixelTransformFailed
+        case transformCreation(String)
         case bitmapContext
         case imageEncoding(URL)
 
@@ -35,18 +34,64 @@ enum ColorCorrectionService {
             case .unsupportedColorSpace(let url):
                 return "Per questa prima versione è richiesto un JPEG RGB: \(url.lastPathComponent)"
             case .profileLoad(let detail):
-                return "ColorSync non riesce a caricare il profilo: \(detail)"
-            case .transformCreation:
-                return "ColorSync non è riuscito a creare la trasformazione ICC."
-            case .transformFailed(let url):
-                return "Conversione ColorSync non riuscita per \(url.lastPathComponent)."
-            case .pixelTransformFailed:
-                return "Conversione ColorSync del buffer RGB non riuscita."
+                return "Impossibile caricare il profilo ICC: \(detail)"
+            case .transformCreation(let detail):
+                return "Impossibile creare la trasformazione colore: \(detail)"
             case .bitmapContext:
                 return "Impossibile creare il buffer bitmap RGB."
             case .imageEncoding(let url):
                 return "Impossibile generare il JPEG temporaneo: \(url.lastPathComponent)"
             }
+        }
+    }
+
+    /// Owns a `selphy_transform`. Immutable after creation, so it can be shared across
+    /// the images of one batch that use the same source profile.
+    final class ColorTransform {
+        private let handle: OpaquePointer
+        let effectiveBlackPointCompensation: Bool
+
+        init(
+            sourceICC: Data?,
+            printerICC: Data,
+            intent: RenderingIntent,
+            blackPointCompensation: Bool,
+            exact: Bool = false
+        ) throws {
+            var options = selphy_options(
+                intent: intent.coreValue,
+                black_point_compensation: blackPointCompensation ? 1 : 0,
+                exact: exact ? 1 : 0
+            )
+            var created: OpaquePointer?
+            let source = sourceICC ?? Data()
+            let status: selphy_status = source.withUnsafeBytes { sourceBytes in
+                printerICC.withUnsafeBytes { printerBytes in
+                    selphy_transform_create(
+                        sourceBytes.bindMemory(to: UInt8.self).baseAddress,
+                        sourceBytes.count,
+                        printerBytes.bindMemory(to: UInt8.self).baseAddress,
+                        printerBytes.count,
+                        &options,
+                        &created
+                    )
+                }
+            }
+            guard status == SELPHY_OK, let created else {
+                let message = String(cString: selphy_status_message(status))
+                if status == SELPHY_ERR_PRINTER_PROFILE || status == SELPHY_ERR_PRINTER_UNSUPPORTED {
+                    throw CorrectionError.profileLoad(message)
+                }
+                throw CorrectionError.transformCreation(message)
+            }
+            handle = created
+            effectiveBlackPointCompensation = selphy_transform_effective_bpc(created) != 0
+        }
+
+        deinit { selphy_transform_free(handle) }
+
+        func apply(_ input: UnsafePointer<UInt8>, to output: UnsafeMutablePointer<UInt8>, pixelCount: Int) {
+            selphy_transform_apply_rgb8(handle, input, output, pixelCount)
         }
     }
 
@@ -56,8 +101,22 @@ enum ColorCorrectionService {
         intent: RenderingIntent,
         blackPointCompensation: Bool
     ) throws -> Result {
-        let printerProfile = try loadProfile(at: printerProfileURL)
+        let printerICC: Data
+        do {
+            printerICC = try Data(contentsOf: printerProfileURL)
+        } catch {
+            throw CorrectionError.profileLoad(error.localizedDescription)
+        }
+        // Fail before touching any source if the printer profile is unusable.
+        _ = try ColorTransform(
+            sourceICC: nil,
+            printerICC: printerICC,
+            intent: intent,
+            blackPointCompensation: blackPointCompensation
+        )
+
         let sessionFolder = try makeSessionFolder()
+        var transformCache: [Data: ColorTransform] = [:]
         var outputs: [URL] = []
 
         do {
@@ -77,9 +136,10 @@ enum ColorCorrectionService {
                 try correct(
                     sourceURL: sourceURL,
                     outputURL: outputURL,
-                    printerProfile: printerProfile,
+                    printerICC: printerICC,
                     intent: intent,
-                    blackPointCompensation: blackPointCompensation
+                    blackPointCompensation: blackPointCompensation,
+                    transformCache: &transformCache
                 )
                 outputs.append(outputURL)
             }
@@ -91,21 +151,13 @@ enum ColorCorrectionService {
         return Result(files: outputs, folder: sessionFolder)
     }
 
-    static func loadProfile(at url: URL) throws -> ColorSyncProfile {
-        var cfError: Unmanaged<CFError>?
-        guard let unmanaged = ColorSyncProfileCreateWithURL(url as CFURL, &cfError) else {
-            let detail = cfError?.takeRetainedValue().localizedDescription ?? "errore sconosciuto"
-            throw CorrectionError.profileLoad(detail)
-        }
-        return unmanaged.takeRetainedValue()
-    }
-
     private static func correct(
         sourceURL: URL,
         outputURL: URL,
-        printerProfile: ColorSyncProfile,
+        printerICC: Data,
         intent: RenderingIntent,
-        blackPointCompensation: Bool
+        blackPointCompensation: Bool,
+        transformCache: inout [Data: ColorTransform]
     ) throws {
         guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
               let image = makeOrientedImage(from: source) else {
@@ -118,17 +170,22 @@ enum ColorCorrectionService {
             throw CorrectionError.unsupportedColorSpace(sourceURL)
         }
 
-        let embeddedICCData = imageColorSpace.copyICCData()
-        let sourceColorSpace = embeddedICCData == nil ? CGColorSpace(name: CGColorSpace.sRGB)! : imageColorSpace
+        // An embedded profile is used as the source; images without one are assumed sRGB.
+        let embeddedICC = imageColorSpace.copyICCData() as Data?
+        let sourceColorSpace = embeddedICC == nil ? CGColorSpace(name: CGColorSpace.sRGB)! : imageColorSpace
 
-        let sourceProfile: ColorSyncProfile
-        if let iccData = embeddedICCData {
-            guard let profile = ColorSyncProfileCreate(iccData, nil)?.takeRetainedValue() else {
-                throw CorrectionError.profileLoad("profilo ICC incorporato nell'immagine non valido")
-            }
-            sourceProfile = profile
+        let cacheKey = embeddedICC ?? Data()
+        let transform: ColorTransform
+        if let cached = transformCache[cacheKey] {
+            transform = cached
         } else {
-            sourceProfile = try makeSRGBProfile()
+            transform = try ColorTransform(
+                sourceICC: embeddedICC,
+                printerICC: printerICC,
+                intent: intent,
+                blackPointCompensation: blackPointCompensation
+            )
+            transformCache[cacheKey] = transform
         }
 
         let width = image.width
@@ -165,14 +222,11 @@ enum ColorCorrectionService {
         }
         guard sourceContextCreated else { throw CorrectionError.bitmapContext }
 
-        let correctedPixels = try convertRGBPixels(
+        let correctedPixels = try convertRGBXPixels(
             sourcePixels,
             width: width,
             height: height,
-            sourceProfile: sourceProfile,
-            printerProfile: printerProfile,
-            intent: intent,
-            blackPointCompensation: blackPointCompensation
+            transform: transform
         )
 
         // Deliberately re-tag the corrected numeric RGB values as sRGB. The
@@ -215,17 +269,14 @@ enum ColorCorrectionService {
         }
     }
 
-    /// Applies the production ColorSync transform to a 32-bit big-endian
-    /// RGBX Core Graphics buffer, packing it to 24-bit RGB for ColorSync.
-    /// Kept internal so tests can compare numeric output before JPEG encoding.
-    static func convertRGBPixels(
+    /// Applies the colour transform to a 32-bit big-endian RGBX Core Graphics
+    /// buffer (the fourth byte is padding), packing it to 24-bit RGB for the core.
+    /// Kept internal so tests can check the buffer handling without JPEG encoding.
+    static func convertRGBXPixels(
         _ sourcePixels: Data,
         width: Int,
         height: Int,
-        sourceProfile: ColorSyncProfile,
-        printerProfile: ColorSyncProfile,
-        intent: RenderingIntent,
-        blackPointCompensation: Bool
+        transform: ColorTransform
     ) throws -> Data {
         guard width > 0, height > 0,
               width <= Int.max / 4,
@@ -233,70 +284,36 @@ enum ColorCorrectionService {
               sourcePixels.count == width * height * 4 else {
             throw CorrectionError.bitmapContext
         }
-        guard let transform = makeTransform(
-            sourceProfile: sourceProfile,
-            printerProfile: printerProfile,
-            intent: intent,
-            blackPointCompensation: blackPointCompensation
-        ) else {
-            throw CorrectionError.transformCreation
-        }
 
-        // ColorSync's packed RGB (three consecutive 8-bit channels) is
-        // reliable across the system CMMs. The 32-bit RGBX layout can be
-        // rejected even for an sRGB identity transform on current macOS.
-        // Keep Core Graphics' convenient 4-byte bitmap at the image boundary,
-        // but explicitly pack/unpack RGB around ColorSyncTransformConvert.
         let pixelCount = width * height
-        let packedBytesPerRow = width * 3
-        var packedSource = Data(count: pixelCount * 3)
-        packedSource.withUnsafeMutableBytes { packedDestination in
-            sourcePixels.withUnsafeBytes { source in
-                let dst = packedDestination.bindMemory(to: UInt8.self)
-                let src = source.bindMemory(to: UInt8.self)
+        var packedSource = [UInt8](repeating: 0, count: pixelCount * 3)
+        sourcePixels.withUnsafeBytes { raw in
+            let src = raw.bindMemory(to: UInt8.self)
+            packedSource.withUnsafeMutableBufferPointer { dst in
                 for pixel in 0..<pixelCount {
-                    let sourceOffset = pixel * 4
-                    let destinationOffset = pixel * 3
-                    dst[destinationOffset] = src[sourceOffset]
-                    dst[destinationOffset + 1] = src[sourceOffset + 1]
-                    dst[destinationOffset + 2] = src[sourceOffset + 2]
+                    dst[pixel * 3] = src[pixel * 4]
+                    dst[pixel * 3 + 1] = src[pixel * 4 + 1]
+                    dst[pixel * 3 + 2] = src[pixel * 4 + 2]
                 }
             }
         }
 
-        var packedCorrected = Data(count: pixelCount * 3)
-        let converted = packedCorrected.withUnsafeMutableBytes { destination in
-            packedSource.withUnsafeBytes { source in
-                ColorSyncTransformConvert(
-                    transform,
-                    width,
-                    height,
-                    destination.baseAddress,
-                    kColorSync8BitInteger,
-                    UInt32(kColorSyncAlphaNone.rawValue),
-                    packedBytesPerRow,
-                    source.baseAddress,
-                    kColorSync8BitInteger,
-                    UInt32(kColorSyncAlphaNone.rawValue),
-                    packedBytesPerRow,
-                    nil
-                )
+        var packedCorrected = [UInt8](repeating: 0, count: pixelCount * 3)
+        packedSource.withUnsafeBufferPointer { input in
+            packedCorrected.withUnsafeMutableBufferPointer { output in
+                transform.apply(input.baseAddress!, to: output.baseAddress!, pixelCount: pixelCount)
             }
         }
-        guard converted else { throw CorrectionError.pixelTransformFailed }
 
         var correctedPixels = Data(count: sourcePixels.count)
-        correctedPixels.withUnsafeMutableBytes { destination in
-            packedCorrected.withUnsafeBytes { source in
-                let dst = destination.bindMemory(to: UInt8.self)
-                let src = source.bindMemory(to: UInt8.self)
+        correctedPixels.withUnsafeMutableBytes { raw in
+            let dst = raw.bindMemory(to: UInt8.self)
+            packedCorrected.withUnsafeBufferPointer { src in
                 for pixel in 0..<pixelCount {
-                    let sourceOffset = pixel * 3
-                    let destinationOffset = pixel * 4
-                    dst[destinationOffset] = src[sourceOffset]
-                    dst[destinationOffset + 1] = src[sourceOffset + 1]
-                    dst[destinationOffset + 2] = src[sourceOffset + 2]
-                    dst[destinationOffset + 3] = 0
+                    dst[pixel * 4] = src[pixel * 3]
+                    dst[pixel * 4 + 1] = src[pixel * 3 + 1]
+                    dst[pixel * 4 + 2] = src[pixel * 3 + 2]
+                    dst[pixel * 4 + 3] = 0
                 }
             }
         }
@@ -316,41 +333,6 @@ enum ColorCorrectionService {
                 kCGImageSourceThumbnailMaxPixelSize: max(width, height)
             ] as CFDictionary
         )
-    }
-
-    private static func makeSRGBProfile() throws -> ColorSyncProfile {
-        guard let unmanaged = ColorSyncProfileCreateWithName(kColorSyncSRGBProfile.takeUnretainedValue()) else {
-            throw CorrectionError.profileLoad("profilo sRGB di sistema non disponibile")
-        }
-        return unmanaged.takeRetainedValue()
-    }
-
-    private static func makeTransform(
-        sourceProfile: ColorSyncProfile,
-        printerProfile: ColorSyncProfile,
-        intent: RenderingIntent,
-        blackPointCompensation: Bool
-    ) -> ColorSyncTransform? {
-        let profileKey = kColorSyncProfile.takeUnretainedValue()
-        let intentKey = kColorSyncRenderingIntent.takeUnretainedValue()
-        let tagKey = kColorSyncTransformTag.takeUnretainedValue()
-        let bpcKey = kColorSyncBlackPointCompensation.takeUnretainedValue()
-
-        let sourceEntry: [CFString: Any] = [
-            profileKey: sourceProfile,
-            intentKey: intent.colorSyncValue,
-            tagKey: kColorSyncTransformDeviceToPCS.takeUnretainedValue(),
-            bpcKey: blackPointCompensation
-        ]
-        let destinationEntry: [CFString: Any] = [
-            profileKey: printerProfile,
-            intentKey: intent.colorSyncValue,
-            tagKey: kColorSyncTransformPCSToDevice.takeUnretainedValue(),
-            bpcKey: blackPointCompensation
-        ]
-
-        let sequence = [sourceEntry as CFDictionary, destinationEntry as CFDictionary] as CFArray
-        return ColorSyncTransformCreate(sequence, nil)?.takeRetainedValue()
     }
 
     private static func makeSessionFolder() throws -> URL {
@@ -379,15 +361,12 @@ enum ColorCorrectionService {
     }
 }
 
-private extension RenderingIntent {
-    var colorSyncValue: CFString {
+extension RenderingIntent {
+    var coreValue: selphy_intent {
         switch self {
-        case .perceptual:
-            kColorSyncRenderingIntentPerceptual.takeUnretainedValue()
-        case .relativeColorimetric:
-            kColorSyncRenderingIntentRelative.takeUnretainedValue()
-        case .saturation:
-            kColorSyncRenderingIntentSaturation.takeUnretainedValue()
+        case .perceptual: SELPHY_INTENT_PERCEPTUAL
+        case .relativeColorimetric: SELPHY_INTENT_RELATIVE_COLORIMETRIC
+        case .saturation: SELPHY_INTENT_SATURATION
         }
     }
 }

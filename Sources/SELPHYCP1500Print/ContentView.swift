@@ -14,6 +14,13 @@ struct ContentView: View {
     @State private var isPreparing = false
     @State private var statusMessage = "Seleziona un profilo ICC e una o più fotografie JPEG."
 
+    /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile. The
+    /// version is known once a profile has been inspected; the Farbenwerk profile is v4.
+    private var blackPointCompensationForced: Bool {
+        let major = profileReport.flatMap { Int($0.version.prefix(1)) } ?? 4
+        return settings.renderingIntent != .relativeColorimetric && major >= 4
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -71,8 +78,17 @@ struct ContentView: View {
                             Text(intent.title).tag(intent)
                         }
                     }
-                    Toggle("Compensazione del punto nero (BPC)", isOn: $settings.blackPointCompensation)
-                    Text("La conversione usa ColorSync. In questa fase è una pre-correzione sperimentale: il JPEG risultante viene etichettato sRGB per il successivo trattamento interno della SELPHY.")
+                    Toggle(
+                        "Compensazione del punto nero (BPC)",
+                        isOn: blackPointCompensationForced ? .constant(true) : $settings.blackPointCompensation
+                    )
+                    .disabled(blackPointCompensationForced)
+                    if blackPointCompensationForced {
+                        Text("Con un profilo ICC v4 la compensazione del punto nero è sempre applicata negli intenti Percettivo e Saturazione (regola ICC); l'opzione vale solo per il Colorimetrico relativo.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("La conversione usa il motore colore integrato (LittleCMS). In questa fase è una pre-correzione sperimentale: il JPEG risultante viene etichettato sRGB per il successivo trattamento interno della SELPHY.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -213,7 +229,7 @@ struct ContentView: View {
             let intent = settings.renderingIntent
             let bpc = settings.blackPointCompensation
             isPreparing = true
-            statusMessage = "Conversione ColorSync in corso…"
+            statusMessage = "Conversione colore in corso…"
 
             Task {
                 let hasProfileAccess = profileURL.startAccessingSecurityScopedResource()
