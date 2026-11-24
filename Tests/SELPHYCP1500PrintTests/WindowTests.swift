@@ -85,6 +85,7 @@ final class WindowTests: XCTestCase {
         let host = NSHostingView(rootView: view)
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false   // ARC owns the window; the default would free it twice
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         window.contentView = host
         window.orderBack(nil)
