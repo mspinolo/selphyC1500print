@@ -20,6 +20,7 @@ final class ConversionProgress: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.openSettings) private var openSettings
     @AppStorage("sidebarVisible") private var sidebarVisible = true
     @State private var selectedPhotos: [URL]
     @State private var previewPhoto: URL?
@@ -89,7 +90,7 @@ struct ContentView: View {
                 .keyboardShortcut("s", modifiers: [.command, .control])
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { openSettings() } label: {
+                Button { showSettings() } label: {
                     Label(tr("Settings"), systemImage: "gearshape")
                 }
                 .help(tr("Settings"))
@@ -120,7 +121,7 @@ struct ContentView: View {
                         .foregroundStyle(.orange)
                         .font(.callout)
                     Spacer()
-                    Button(tr("Open Settings…")) { openSettings() }
+                    Button(tr("Open Settings…")) { showSettings() }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 10)
@@ -361,9 +362,8 @@ struct ContentView: View {
         savedFolder = nil
     }
 
-    private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-    }
+    /// The responder-chain action ("showSettingsWindow:") does nothing on macOS 14+: use the environment action.
+    private func showSettings() { openSettings() }
 
     private func prepareCopies() {
         do {

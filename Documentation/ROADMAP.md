@@ -127,6 +127,13 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [x] App icon (owner chose "printout coming out of a printer", 2026-11-24): original artwork drawn by `scripts/make-icon.py`, delivered as `Packaging/AppIcon.icns` (all standard sizes), named in Info.plist, copied by `make-app.sh`, checked by `verify-app.sh` and by a test.
 - [x] Defect (reported 2026-11-24): closing the window left the process running with no way to reopen a window (the "New Window" command is removed). Fixed: the app quits when its last window closes (`AppDelegate`, tested).
 
+### M5b - Analysis tools (owner requests, 2026-11-24, after trying release 0.0.2)
+- [x] Bug: the gear button in the toolbar did nothing (the "showSettingsWindow:" responder action no longer works on macOS 14+): now uses `@Environment(\.openSettings)`.
+- [ ] Colour-deviation statistics for the loaded photos (beyond the current mean / 95th percentile / shares): dE00 histogram, median/max, shares above user-chosen thresholds, split by lightness zones (shadows, mid-tones, highlights); a summary table across all loaded photos to spot the problematic ones.
+- [ ] dE map with a user-adjustable scale (low and high dE for the colour ramp, with a legend) instead of the fixed 1 / 3 / 6.
+- [ ] "Too dark" overlay: highlight the pixels darker than the darkest tone the printer reproduces (merged or compressed shadows), with adjustable margin.
+- [ ] Candidates proposed to the owner (to be confirmed): out-of-gamut colour overlay; pixel inspector (original vs predicted Lab and dE under the cursor); 1:1 zoom and pan; Postcard crop guide (100 x 148 mm) showing what "Fill" would cut; automatic comparison of the three intents with a suggestion; exporting the analysis as CSV/PDF.
+
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
 
