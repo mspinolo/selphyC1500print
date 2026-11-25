@@ -200,7 +200,23 @@ final class WindowTests: XCTestCase {
                      name: "14-fullscreen-side-by-side", dark: true, wait: 2, to: out)
         full.stop()
 
+        // The ΔE00 distribution scope (below the fold of the Statistics window), on the four axes.
+        if let profilePath = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] {
+            let profile = try Data(contentsOf: URL(fileURLWithPath: profilePath))
+            let maps = try PreviewSession().quickAnalysis(sourceURL: files[0], printerICC: profile, intent: .perceptual,
+                                                          blackPointCompensation: false).maps
+            let scopes = VStack(alignment: .leading, spacing: 14) {
+                ForEach(ScopeAxis.allCases) { axis in
+                    Text(axis.title).font(.headline)
+                    DeltaEScopeView(scope: DeltaEScope.make(maps: maps, axis: axis))
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .windowBackgroundColor))
+            try snapshot(scopes, size: CGSize(width: 900, height: 1260), name: "15-scope-en", wait: 1, to: out)
+        }
+
         let written = try FileManager.default.contentsOfDirectory(atPath: out.path).filter { $0.hasSuffix(".png") }
-        XCTAssertEqual(written.count, 14)
+        XCTAssertGreaterThanOrEqual(written.count, 14)
     }
 }
