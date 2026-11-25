@@ -113,9 +113,9 @@ final class PreviewSession: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var corrections = LRU<CorrectionKey, CorrectionStage>(capacity: 3)
-    private var transforms = LRU<TransformKey, TransformStage>(capacity: 6)
-    private var renders = LRU<RenderKey, RenderStage>(capacity: 8)
+    private var corrections: LRU<CorrectionKey, CorrectionStage>
+    private var transforms: LRU<TransformKey, TransformStage>
+    private var renders: LRU<RenderKey, RenderStage>
     private var _counters = Counters()
     private var _timings: [String: Double] = [:]
 
@@ -123,7 +123,16 @@ final class PreviewSession: @unchecked Sendable {
     /// Seconds spent in each stage the last time it was computed.
     var timings: [String: Double] { locked { _timings } }
 
-    init() {}
+    /// The session of the interactive preview (reduced size), shared by the preview panel and
+    /// the full-screen view.
+    static let shared = PreviewSession()
+
+    /// Capacities in entries; a full-resolution session keeps fewer (each entry can be hundreds of MB).
+    init(corrections: Int = 3, transforms: Int = 6, renders: Int = 8) {
+        self.corrections = LRU(capacity: corrections)
+        self.transforms = LRU(capacity: transforms)
+        self.renders = LRU(capacity: renders)
+    }
 
     /// Drops everything (e.g. when the printer profile is replaced and memory should be freed).
     func removeAll() {

@@ -26,6 +26,13 @@ struct SELPHYCP1500PrintApp: App {
         .defaultSize(width: 980, height: 680)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .toolbar) {
+                Button(tr("Full-screen view")) {
+                    FullScreenController.shared.toggle(settings: settings, selection: selection)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(selection.photos.isEmpty || settings.profileBookmark == nil)
+            }
         }
         // A window of its own (not a sheet), so that it can stay open next to the preview.
         Window(tr("Colour deviation statistics"), id: StatisticsView.windowID) {

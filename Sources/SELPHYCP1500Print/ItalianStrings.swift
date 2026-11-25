@@ -223,5 +223,15 @@ enum ItalianStrings {
         "Light": "Chiaro",
         "Mid-grey interface with a middle grey (L* 50) around the photo, as in darktable's grey theme: a neutral surround makes colours and brightness easier to judge. Controls are grey too, without the accent colour.": "Interfaccia grigia con un grigio medio (L* 50) intorno alla fotografia, come nel tema grigio di darktable: un contorno neutro rende più facile giudicare colori e luminosità. Anche i controlli sono grigi, senza il colore di evidenziazione.",
         "Neutral grey (for judging colours)": "Grigio neutro (per giudicare i colori)",
+        "%d × %d px, full resolution": "%d × %d px, risoluzione piena",
+        "1 Original · 2 Without correction · 3 With correction · 4 Compare · S side by side · Z fit/100% · +/− zoom · ←/→ photos · I hide · Esc close": "1 Originale · 2 Senza correzione · 3 Con correzione · 4 Confronto · S affiancate · Z adatta/100% · +/− zoom · ←/→ foto · I nascondi · Esc chiudi",
+        "Close (Esc)": "Chiudi (Esc)",
+        "Compare side by side": "Confronto affiancato",
+        "Computing the full resolution…": "Calcolo della risoluzione piena…",
+        "Fit (%d%%)": "Adatta (%d%%)",
+        "Full resolution unavailable: %@": "Risoluzione piena non disponibile: %@",
+        "Full-screen view": "Vista a tutto schermo",
+        "Full-screen view at full resolution on a neutral grey background (Shift-Command-F; Esc closes it)": "Vista a tutto schermo a risoluzione piena su sfondo grigio neutro (Maiuscole-Comando-F; Esc la chiude)",
+        "Zoom %d%%": "Zoom %d%%",
     ]
 }

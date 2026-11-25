@@ -12,6 +12,17 @@ Fifth pre-release. Not verified on physical prints.
   #777777 (L* 50, no chroma) behind the photo, grey controls without the accent colour; it
   applies to all windows and to the system dialogs.
 
+- Full-screen view (toolbar button, View menu, Shift-Command-F; off until called): the photo at
+  full resolution on darktable's middle grey (#777777, L* 50), with the same soft-proof as the
+  preview. Keys 1-4 for Original / Without / With correction / Compare, S side by side, Z fit or
+  100% (one image pixel per screen pixel), +/- and pinch to zoom, drag or scroll to move, left and
+  right arrows for the previous/next photo, I to hide the indications, Esc to close. At the bottom,
+  thumbnails of the loaded photos to jump to one; the indications hide themselves after 2 seconds.
+  The reduced preview appears at once and is replaced by the full resolution when ready; only the
+  last two photos are kept at full size, and everything is freed on closing.
+- The preview options (paper white, monitor black) are remembered and shared with the full-screen
+  view.
+
 ### Fixed
 - The Statistics window had no background of its own: its light-mode snapshot came out dark.
 

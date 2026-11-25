@@ -81,6 +81,17 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(outputFormat.rawValue, forKey: Keys.outputFormat) }
     }
 
+    /// Preview option: simulate the paper tint and brightness (shared by the preview and the
+    /// full-screen view).
+    @Published var simulatePaperWhite: Bool {
+        didSet { defaults.set(simulatePaperWhite, forKey: Keys.simulatePaperWhite) }
+    }
+
+    /// Preview option: stretch the printed black to the monitor's black.
+    @Published var previewMonitorBlack: Bool {
+        didSet { defaults.set(previewMonitorBlack, forKey: Keys.previewMonitorBlack) }
+    }
+
     /// Interface theme: follows the system by default; neutral grey for judging colours.
     @Published var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
@@ -116,6 +127,8 @@ final class AppSettings: ObservableObject {
     private enum Keys {
         static let language = "language"
         static let theme = "interfaceTheme"
+        static let simulatePaperWhite = "previewSimulatePaperWhite"
+        static let previewMonitorBlack = "previewMonitorBlack"
         static let printerName = "selectedPrinterName"
         static let renderingIntent = "renderingIntent"
         static let blackPointCompensation = "blackPointCompensation"
@@ -140,6 +153,8 @@ final class AppSettings: ObservableObject {
         self.printFit = PrintFit(rawValue: defaults.string(forKey: Keys.printFit) ?? "") ?? .fit
         self.hidePrintNotice = defaults.bool(forKey: Keys.hidePrintNotice)
         self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
+        self.simulatePaperWhite = defaults.bool(forKey: Keys.simulatePaperWhite)
+        self.previewMonitorBlack = defaults.bool(forKey: Keys.previewMonitorBlack)
         self.profileBookmark = defaults.data(forKey: Keys.profileBookmark)
         self.profileDisplayName = defaults.string(forKey: Keys.profileDisplayName) ?? ""
         self.saveFolderBookmark = defaults.data(forKey: Keys.saveFolderBookmark)

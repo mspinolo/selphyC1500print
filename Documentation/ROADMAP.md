@@ -155,6 +155,8 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [ ] Open: confirm on a Mac that the Statistics window remembers its size and position, and the speed of the statistics with many photos.
 - [x] (0.0.5, owner request) Neutral grey interface theme for judging colours, after darktable 5.6's grey theme (values from darktable-elegant-grey.css / darktable.css: bg #6A6A6A, darkroom background #777777 = L* 50); Settings > General > Interface theme. Fix: the Statistics window now paints its own background (light snapshot was dark).
 - [ ] Open: owner check of the grey theme on a Mac (contrast of secondary text, toolbar, sidebar, dialogs).
+- [x] (0.0.5, owner request) Full-screen view at full resolution on darktable's middle grey, on request only (Shift-Command-F / toolbar / View menu): views 1-4, side by side, fit/100%/zoom/pan, previous/next, thumbnail strip, self-hiding indications; reduced preview first, full resolution in the background (last two photos kept).
+- [ ] Open: owner check on a Mac: speed of the full resolution on large files, memory, behaviour on a second screen and with the main window in macOS full screen.
 
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.

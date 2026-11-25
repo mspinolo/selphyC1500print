@@ -56,8 +56,6 @@ struct PreviewPanel: View {
 
     @State private var mode: Mode = .compare
     @State private var zoom: Zoom = .fit
-    @State private var simulatePaperWhite = false
-    @State private var previewBlackPointCompensation = false
     @State private var preview: PreviewService.Preview?
     @State private var errorMessage: String?
     @State private var isRendering = false
@@ -72,8 +70,9 @@ struct PreviewPanel: View {
     /// The pointer readout lives in its own object, held without observing it: pointer moves then
     /// redraw only the readout line, not the whole panel (images, overlays, controls).
     @State private var pointer = PointerReadout()
-    /// Keeps the decoded/corrected buffers and renderings between re-renders.
-    @State private var session = PreviewSession()
+    /// Keeps the decoded/corrected buffers and renderings between re-renders; shared with the
+    /// full-screen view, which shows the same reduced preview at once while it computes the full size.
+    private var session: PreviewSession { .shared }
 
     /// Everything that changes the result; used to re-render automatically.
     private struct RenderKey: Equatable {
@@ -101,8 +100,8 @@ struct PreviewPanel: View {
             photo: currentPhoto,
             intent: settings.renderingIntent,
             bpc: settings.blackPointCompensation,
-            paper: simulatePaperWhite,
-            previewBPC: previewBlackPointCompensation,
+            paper: settings.simulatePaperWhite,
+            previewBPC: settings.previewMonitorBlack,
             profile: settings.profileBookmark
         )
     }
@@ -173,9 +172,9 @@ struct PreviewPanel: View {
                 .help(tr("Zoom of the preview image (100% = one preview pixel per point). Scroll to move around."))
                 Spacer()
                 Menu {
-                    Toggle(tr("Simulate paper white"), isOn: $simulatePaperWhite)
-                    Toggle(tr("Monitor black instead of printed black"), isOn: $previewBlackPointCompensation)
-                        .disabled(simulatePaperWhite)
+                    Toggle(tr("Simulate paper white"), isOn: $settings.simulatePaperWhite)
+                    Toggle(tr("Monitor black instead of printed black"), isOn: $settings.previewMonitorBlack)
+                        .disabled(settings.simulatePaperWhite)
                 } label: {
                     Label(tr("Preview options"), systemImage: "slider.horizontal.3")
                 }
@@ -392,8 +391,8 @@ struct PreviewPanel: View {
                 intent: settings.renderingIntent,
                 blackPointCompensation: settings.blackPointCompensation
             )
-            options.simulatePaperWhite = simulatePaperWhite
-            options.previewBlackPointCompensation = previewBlackPointCompensation
+            options.simulatePaperWhite = settings.simulatePaperWhite
+            options.previewBlackPointCompensation = settings.previewMonitorBlack
             let session = session
             let result = try await Task.detached(priority: .userInitiated) {
                 try session.makePreview(sourceURL: photo, printerICC: printerICC, display: display, options: options)
@@ -524,7 +523,7 @@ private struct ImageFit: View {
 
 /// Two renderings of the same photo with a draggable divider: `before` on the left,
 /// `after` on the right.
-private struct ComparisonSlider: View {
+struct ComparisonSlider: View {
     let before: CGImage
     let after: CGImage
     @Binding var fraction: Double

@@ -188,7 +188,19 @@ final class WindowTests: XCTestCase {
                      name: "12-settings-grey", dark: true, wait: 1, to: out)
         settings.theme = .system
 
+        // Full-screen view (darktable middle grey), with the indications and thumbnails, then side by side.
+        let full = FullScreenModel(photos: files, current: files[0], settings: settings, selection: nil)
+        full.autoHidesHUD = false
+        full.backingScale = 1
+        full.start()
+        try snapshot(FullScreenView(model: full).environmentObject(settings), size: CGSize(width: 1280, height: 800),
+                     name: "13-fullscreen-compare", dark: true, wait: 8, to: out)
+        full.handle(.toggleSideBySide)
+        try snapshot(FullScreenView(model: full).environmentObject(settings), size: CGSize(width: 1280, height: 800),
+                     name: "14-fullscreen-side-by-side", dark: true, wait: 2, to: out)
+        full.stop()
+
         let written = try FileManager.default.contentsOfDirectory(atPath: out.path).filter { $0.hasSuffix(".png") }
-        XCTAssertEqual(written.count, 12)
+        XCTAssertEqual(written.count, 14)
     }
 }

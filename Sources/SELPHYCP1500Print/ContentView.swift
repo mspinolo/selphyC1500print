@@ -94,6 +94,13 @@ struct ContentView: View {
                 .keyboardShortcut("s", modifiers: [.command, .control])
             }
             ToolbarItem(placement: .primaryAction) {
+                Button { FullScreenController.shared.toggle(settings: settings, selection: selection) } label: {
+                    Label(tr("Full-screen view"), systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+                .help(tr("Full-screen view at full resolution on a neutral grey background (Shift-Command-F; Esc closes it)"))
+                .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { openWindow(id: StatisticsView.windowID) } label: {
                     Label(tr("Statistics"), systemImage: "chart.bar")
                 }
