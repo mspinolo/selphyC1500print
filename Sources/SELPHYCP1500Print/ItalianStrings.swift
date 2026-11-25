@@ -216,5 +216,12 @@ enum ItalianStrings {
         "ΔE00 3 to 6": "ΔE00 da 3 a 6",
         "ΔE00 6 and above": "ΔE00 6 e oltre",
         "ΔE00 below 1": "ΔE00 sotto 1",
+        "Dark": "Scuro",
+        "Follow the system": "Come il sistema",
+        "For judging the colours of the photos, the neutral grey theme is more reliable than a light or dark interface.": "Per giudicare i colori delle fotografie il tema grigio neutro è più affidabile di un'interfaccia chiara o scura.",
+        "Interface theme": "Tema dell'interfaccia",
+        "Light": "Chiaro",
+        "Mid-grey interface with a middle grey (L* 50) around the photo, as in darktable's grey theme: a neutral surround makes colours and brightness easier to judge. Controls are grey too, without the accent colour.": "Interfaccia grigia con un grigio medio (L* 50) intorno alla fotografia, come nel tema grigio di darktable: un contorno neutro rende più facile giudicare colori e luminosità. Anche i controlli sono grigi, senza il colore di evidenziazione.",
+        "Neutral grey (for judging colours)": "Grigio neutro (per giudicare i colori)",
     ]
 }

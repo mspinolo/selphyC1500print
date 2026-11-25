@@ -11,6 +11,7 @@ struct PhotoSidebar: View {
     let drop: ([URL]) -> Bool
 
     @State private var isTargeted = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -61,11 +62,11 @@ struct PhotoSidebar: View {
             }
             .padding(10)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.panelBackground)
         .overlay {
             if isTargeted {
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.accentColor, lineWidth: 2)
+                    .stroke(palette.highlight, lineWidth: 2)
                     .padding(2)
                     .allowsHitTesting(false)
             }
@@ -86,7 +87,7 @@ struct PhotoSidebar: View {
         .padding(6)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                .fill(isSelected ? palette.selection : Color.clear)
         )
         .contentShape(Rectangle())
         .onTapGesture { select(url) }

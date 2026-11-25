@@ -3,6 +3,18 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.5] - 2026-11-25
+Fifth pre-release. Not verified on physical prints.
+
+### Added
+- Interface theme in Settings: follow the system, light, dark, or neutral grey. The neutral grey
+  theme takes its values from darktable 5.6's "elegant grey" theme: panels #6A6A6A, a middle grey
+  #777777 (L* 50, no chroma) behind the photo, grey controls without the accent colour; it
+  applies to all windows and to the system dialogs.
+
+### Fixed
+- The Statistics window had no background of its own: its light-mode snapshot came out dark.
+
 ## [0.0.4] - 2026-11-25
 Fourth pre-release. Not verified on physical prints.
 

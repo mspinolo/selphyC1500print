@@ -20,6 +20,8 @@ struct SELPHYCP1500PrintApp: App {
             ContentView()
                 .environmentObject(settings)
                 .environmentObject(selection)
+                .onAppear { AppTheme.apply(settings.theme) }
+                .onChange(of: settings.theme) { AppTheme.apply(settings.theme) }
         }
         .defaultSize(width: 980, height: 680)
         .commands {

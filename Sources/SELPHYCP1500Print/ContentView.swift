@@ -82,6 +82,7 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.18), value: sidebarVisible)
         .frame(minWidth: 760, minHeight: 520)
+        .themed(settings.theme)
         .navigationTitle("SELPHY CP1500 Print")
         .navigationSubtitle(currentPhoto?.lastPathComponent ?? "")
         .toolbar {
@@ -167,7 +168,7 @@ struct ContentView: View {
         }
         // Explicit, appearance-aware background: without it the pane showed white under light-coloured
         // text in dark mode when the view was not drawn inside a window (and never depends on the host).
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(settings.theme.palette.windowBackground)
     }
 
     private var generatedStrip: some View {

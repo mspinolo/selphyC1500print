@@ -167,9 +167,9 @@ final class WindowTests: XCTestCase {
         UserDefaults.standard.set(true, forKey: "sidebarVisible")
         settings.language = .italian
         try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "5-photos-it", to: out)
-        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 520), name: "6-settings-it", wait: 1, to: out)
+        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 680), name: "6-settings-it", wait: 1, to: out)
         settings.language = .english
-        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 520), name: "7-settings-en", wait: 1, to: out)
+        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 680), name: "7-settings-en", wait: 1, to: out)
         let statistics = PhotoSelection()
         statistics.photos = files
         statistics.selected = files[0]
@@ -178,7 +178,17 @@ final class WindowTests: XCTestCase {
         try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
                      size: CGSize(width: 920, height: 760), name: "9-statistics-en-dark", dark: true, wait: 4, to: out)
 
+        // Neutral grey theme (darktable-like): built on the dark appearance.
+        settings.theme = .neutralGrey
+        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size,
+                     name: "10-photos-grey", dark: true, to: out)
+        try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
+                     size: CGSize(width: 920, height: 760), name: "11-statistics-grey", dark: true, wait: 4, to: out)
+        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 680),
+                     name: "12-settings-grey", dark: true, wait: 1, to: out)
+        settings.theme = .system
+
         let written = try FileManager.default.contentsOfDirectory(atPath: out.path).filter { $0.hasSuffix(".png") }
-        XCTAssertEqual(written.count, 9)
+        XCTAssertEqual(written.count, 12)
     }
 }

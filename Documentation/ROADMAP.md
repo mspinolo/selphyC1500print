@@ -153,6 +153,8 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [x] Settings: rendering intent next to BPC (same setting as the main window), "Show in Finder" for the profile.
 - [x] About window: credits and the full LittleCMS MIT licence (also as `Licenses/LittleCMS-LICENSE.txt` in the bundle).
 - [ ] Open: confirm on a Mac that the Statistics window remembers its size and position, and the speed of the statistics with many photos.
+- [x] (0.0.5, owner request) Neutral grey interface theme for judging colours, after darktable 5.6's grey theme (values from darktable-elegant-grey.css / darktable.css: bg #6A6A6A, darkroom background #777777 = L* 50); Settings > General > Interface theme. Fix: the Statistics window now paints its own background (light snapshot was dark).
+- [ ] Open: owner check of the grey theme on a Mac (contrast of secondary text, toolbar, sidebar, dialogs).
 
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.

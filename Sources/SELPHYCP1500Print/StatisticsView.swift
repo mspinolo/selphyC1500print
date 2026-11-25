@@ -146,6 +146,10 @@ struct StatisticsView: View {
         }
         .padding(16)
         .frame(minWidth: 760, minHeight: 560)
+        // Its own, appearance-aware background: without it the view had none when drawn outside a
+        // real window (the light-mode snapshot came out dark), as happened to the main pane.
+        .background(settings.theme.palette.windowBackground)
+        .themed(settings.theme)
         .navigationTitle(tr("Colour deviation statistics"))
         .onAppear { loadProfile() }
         .onChange(of: settings.profileBookmark) { loadProfile() }

@@ -81,6 +81,14 @@ struct SettingsView: View {
                         Text(language.nativeName).tag(language)
                     }
                 }
+                Picker(tr("Interface theme"), selection: $settings.theme) {
+                    ForEach(AppTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                Text(settings.theme.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle(tr("Show the notice before printing"), isOn: Binding(
                     get: { !settings.hidePrintNotice },
                     set: { settings.hidePrintNotice = !$0 }
@@ -88,6 +96,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(settings.theme.palette.paintsBackgrounds ? .hidden : .automatic)
+        .background(settings.theme.palette.paintsBackgrounds ? settings.theme.palette.windowBackground : Color.clear)
+        .themed(settings.theme)
         .frame(width: 540)
         .fixedSize(horizontal: false, vertical: true)
         .onAppear { restoreProfileReport() }

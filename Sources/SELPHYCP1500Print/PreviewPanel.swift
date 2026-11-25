@@ -295,6 +295,8 @@ struct PreviewPanel: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 200, maxHeight: .infinity)
+        // Behind the photo: the window colour, or middle grey (L* 50) in the neutral grey theme.
+        .background(settings.theme.palette.imageSurround)
     }
 
     @ViewBuilder

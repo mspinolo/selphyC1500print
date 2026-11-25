@@ -81,6 +81,11 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(outputFormat.rawValue, forKey: Keys.outputFormat) }
     }
 
+    /// Interface theme: follows the system by default; neutral grey for judging colours.
+    @Published var theme: AppTheme {
+        didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
+    }
+
     /// Interface language: English by default, Italian on request.
     @Published var language: AppLanguage {
         didSet {
@@ -110,6 +115,7 @@ final class AppSettings: ObservableObject {
 
     private enum Keys {
         static let language = "language"
+        static let theme = "interfaceTheme"
         static let printerName = "selectedPrinterName"
         static let renderingIntent = "renderingIntent"
         static let blackPointCompensation = "blackPointCompensation"
@@ -133,6 +139,7 @@ final class AppSettings: ObservableObject {
         self.outputFormat = OutputFormat(rawValue: defaults.string(forKey: Keys.outputFormat) ?? "") ?? .png
         self.printFit = PrintFit(rawValue: defaults.string(forKey: Keys.printFit) ?? "") ?? .fit
         self.hidePrintNotice = defaults.bool(forKey: Keys.hidePrintNotice)
+        self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
         self.profileBookmark = defaults.data(forKey: Keys.profileBookmark)
         self.profileDisplayName = defaults.string(forKey: Keys.profileDisplayName) ?? ""
         self.saveFolderBookmark = defaults.data(forKey: Keys.saveFolderBookmark)
