@@ -53,7 +53,7 @@ final class FullScreenTests: XCTestCase {
         XCTAssertEqual(FullScreenGeometry.clampedOffset(CGSize(width: 50, height: -50), display: CGSize(width: 800, height: 600),
                                                        area: CGSize(width: 1000, height: 700)), .zero)
         XCTAssertEqual(FullScreenGeometry.clampedOffset(CGSize(width: 900, height: -900), display: CGSize(width: 3000, height: 2000),
-                                                       area: CGSize(width: 1000, height: 1000)), CGSize(width: 1000, height: -500))
+                                                       area: CGSize(width: 1000, height: 1000)), CGSize(width: 900, height: -500))
     }
 
     // MARK: Keys and commands
