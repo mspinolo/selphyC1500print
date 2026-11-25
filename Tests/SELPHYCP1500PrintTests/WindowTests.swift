@@ -156,23 +156,29 @@ final class WindowTests: XCTestCase {
             try settings.chooseProfile(at: URL(fileURLWithPath: profile))
         }
         let size = CGSize(width: 980, height: 680)
+        let selection = PhotoSelection()
 
         UserDefaults.standard.set(true, forKey: "sidebarVisible")
-        try snapshot(ContentView().environmentObject(settings), size: size, name: "1-empty-en", wait: 1, to: out)
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings), size: size, name: "2-photos-en", to: out)
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings), size: size, name: "3-photos-en-dark", dark: true, to: out)
+        try snapshot(ContentView().environmentObject(settings).environmentObject(selection), size: size, name: "1-empty-en", wait: 1, to: out)
+        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "2-photos-en", to: out)
+        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "3-photos-en-dark", dark: true, to: out)
         UserDefaults.standard.set(false, forKey: "sidebarVisible")
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings), size: size, name: "4-sidebar-hidden-en", to: out)
+        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "4-sidebar-hidden-en", to: out)
         UserDefaults.standard.set(true, forKey: "sidebarVisible")
         settings.language = .italian
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings), size: size, name: "5-photos-it", to: out)
+        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "5-photos-it", to: out)
         try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 520), name: "6-settings-it", wait: 1, to: out)
         settings.language = .english
         try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 520), name: "7-settings-en", wait: 1, to: out)
-        try snapshot(StatisticsView(photos: files, selected: files[0]).environmentObject(settings),
-                     size: CGSize(width: 820, height: 760), name: "8-statistics-en", wait: 8, to: out)
+        let statistics = PhotoSelection()
+        statistics.photos = files
+        statistics.selected = files[0]
+        try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
+                     size: CGSize(width: 920, height: 760), name: "8-statistics-en", wait: 8, to: out)
+        try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
+                     size: CGSize(width: 920, height: 760), name: "9-statistics-en-dark", dark: true, wait: 4, to: out)
 
         let written = try FileManager.default.contentsOfDirectory(atPath: out.path).filter { $0.hasSuffix(".png") }
-        XCTAssertEqual(written.count, 8)
+        XCTAssertEqual(written.count, 9)
     }
 }

@@ -410,6 +410,16 @@ selphy_status selphy_analyze_photo(
     const uint8_t *srgb_rgb8, const uint8_t *device_rgb8, size_t pixel_count,
     const uint8_t corrected_black_rgb8[3],
     float *de_map, selphy_photo_stats *out_stats) {
+    return selphy_analyze_photo_lab(printer_icc, printer_icc_size, srgb_rgb8, device_rgb8, pixel_count,
+                                    corrected_black_rgb8, de_map, NULL, NULL, out_stats);
+}
+
+selphy_status selphy_analyze_photo_lab(
+    const uint8_t *printer_icc, size_t printer_icc_size,
+    const uint8_t *srgb_rgb8, const uint8_t *device_rgb8, size_t pixel_count,
+    const uint8_t corrected_black_rgb8[3],
+    float *de_map, float *intended_lab, float *predicted_lab,
+    selphy_photo_stats *out_stats) {
     if (out_stats == NULL) return SELPHY_ERR_ARGUMENT;
     memset(out_stats, 0, sizeof(*out_stats));
     out_stats->neutral_p95_chroma = -1.0;
@@ -483,6 +493,12 @@ selphy_status selphy_analyze_photo(
                 }
             }
             if (de_map != NULL) de_map[done + p] = (float)de;
+        }
+        if (intended_lab != NULL) {
+            for (size_t i = 0; i < n * 3; i++) intended_lab[done * 3 + i] = (float)lab_s[i];
+        }
+        if (predicted_lab != NULL) {
+            for (size_t i = 0; i < n * 3; i++) predicted_lab[done * 3 + i] = (float)lab_d[i];
         }
         done += n;
     }

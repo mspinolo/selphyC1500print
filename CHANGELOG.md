@@ -3,6 +3,32 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.4] - 2026-11-25
+Fourth pre-release. Not verified on physical prints.
+
+### Changed
+- Statistics is now a window of its own instead of a sheet: resizable, it can stay open next to
+  the preview and follows the previewed photo; a click in its table selects the photo in the
+  main window. Sortable columns, histogram coloured by dE00 band with mean and 95th percentile
+  marked, best rendering intent highlighted with a "Use" button, progress counter, tooltips on
+  the metrics.
+- Settings: the rendering intent is also shown next to black point compensation (same setting
+  as the main window); "Show in Finder" for the profile.
+- About window: credits and the full LittleCMS licence text (also included in the app bundle).
+
+### Performance
+- Moving the pointer over the preview redraws only the readout line (in the Dark zones and Out
+  of gamut views the highlighted share was recomputed over every pixel at each move).
+- The analysis computes the Lab values once (new core function `selphy_analyze_photo_lab`):
+  about a third less work per photo and per intent change; results are identical.
+- Statistics: each photo is decoded once for the three intents, several photos are analysed at
+  the same time, and results are kept while the app is open (reopening the window is instant).
+- Thumbnails are cached.
+
+### Fixed
+- Preview caches identified ICC profiles by length and first 80 bytes only: two different
+  profiles with the same header could share cached results. They now use a SHA-256 digest.
+
 ## [0.0.3] - 2026-11-25
 Third pre-release. Not verified on physical prints.
 

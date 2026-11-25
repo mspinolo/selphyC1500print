@@ -20,13 +20,14 @@ final class ConversionProgress: ObservableObject {
 
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var selection: PhotoSelection
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarVisible") private var sidebarVisible = true
     @State private var selectedPhotos: [URL]
     @State private var previewPhoto: URL?
     @State private var access = PhotoAccess()
     @State private var showingPhotoPicker = false
-    @State private var showingStatistics = false
     @State private var generatedCopies: [URL] = []
     @StateObject private var printService = PrintService()
     @State private var isPrinting = false
@@ -92,7 +93,7 @@ struct ContentView: View {
                 .keyboardShortcut("s", modifiers: [.command, .control])
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { showingStatistics = true } label: {
+                Button { openWindow(id: StatisticsView.windowID) } label: {
                     Label(tr("Statistics"), systemImage: "chart.bar")
                 }
                 .help(tr("Colour deviation statistics, intent comparison and export"))
@@ -104,10 +105,6 @@ struct ContentView: View {
                 }
                 .help(tr("Settings"))
             }
-        }
-        .sheet(isPresented: $showingStatistics) {
-            StatisticsView(photos: selectedPhotos, selected: currentPhoto)
-                .environmentObject(settings)
         }
         .fileImporter(
             isPresented: $showingPhotoPicker,
@@ -121,6 +118,25 @@ struct ContentView: View {
             allowsMultipleSelection: false,
             onCompletion: handleSaveFolderSelection
         )
+        // Keep the Statistics window in step with the photo list and the previewed photo, and
+        // follow a photo chosen there.
+        .onAppear { publishSelection() }
+        .onChange(of: selectedPhotos) { publishSelection() }
+        .onChange(of: currentPhoto) { publishSelection() }
+        .onChange(of: selection.selected) { followSelection() }
+    }
+
+    private func publishSelection() {
+        if selection.photos != selectedPhotos { selection.photos = selectedPhotos }
+        if selection.selected != currentPhoto { selection.selected = currentPhoto }
+    }
+
+    private func followSelection() {
+        if let chosen = selection.selected {
+            if chosen != currentPhoto, selectedPhotos.contains(chosen) { previewPhoto = chosen }
+        } else if currentPhoto != nil {
+            selection.selected = currentPhoto   // a click outside the rows: keep showing the previewed photo
+        }
     }
 
     private var detail: some View {

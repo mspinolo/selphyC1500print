@@ -1,7 +1,7 @@
 import Foundation
 
 /// The parts of the tonal range the statistics are split by (intended lightness of each pixel).
-enum LightnessZone: String, CaseIterable, Identifiable {
+enum LightnessZone: String, CaseIterable, Identifiable, Sendable {
     case shadows, midtones, highlights
 
     var id: String { rawValue }
@@ -23,8 +23,8 @@ enum LightnessZone: String, CaseIterable, Identifiable {
 
 /// Distribution of the predicted colour deviation (dE00 between the photo as it should look and
 /// the predicted print) over the pixels of a photo. Model estimates, not print measurements.
-struct DeviationStatistics: Equatable {
-    struct Zone: Equatable {
+struct DeviationStatistics: Equatable, Sendable {
+    struct Zone: Equatable, Sendable {
         var zone: LightnessZone
         var share: Double
         var mean: Double
@@ -32,7 +32,7 @@ struct DeviationStatistics: Equatable {
         var shareAbove: Double
     }
 
-    struct Bin: Equatable, Identifiable {
+    struct Bin: Equatable, Identifiable, Sendable {
         var lower: Double
         var upper: Double
         var share: Double
@@ -108,5 +108,30 @@ struct DeviationStatistics: Equatable {
             },
             zones: zones
         )
+    }
+}
+
+/// Bands of the deviation histogram, matching the colours of the ΔE map's standard scale
+/// (transparent below 1, yellow around 3, red from 6).
+enum DeviationBand: String, CaseIterable, Identifiable, Sendable {
+    case belowOne, oneToThree, threeToSix, sixAndAbove
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .belowOne: tr("ΔE00 below 1")
+        case .oneToThree: tr("ΔE00 1 to 3")
+        case .threeToSix: tr("ΔE00 3 to 6")
+        case .sixAndAbove: tr("ΔE00 6 and above")
+        }
+    }
+
+    /// The band of a histogram bin, from its lower edge.
+    static func band(forLower lower: Double) -> DeviationBand {
+        if lower < 1 { return .belowOne }
+        if lower < 3 { return .oneToThree }
+        if lower < 6 { return .threeToSix }
+        return .sixAndAbove
     }
 }

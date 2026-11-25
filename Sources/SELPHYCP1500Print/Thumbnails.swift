@@ -45,7 +45,46 @@ enum Thumbnail {
     }
 }
 
-/// Square thumbnail, loaded off the main thread.
+/// Thumbnails already made, so that hiding the photo list, scrolling or reselecting does not decode
+/// the files again. Keyed by path, modification date and size; NSCache drops entries under memory
+/// pressure.
+final class ThumbnailCache: @unchecked Sendable {
+    static let shared = ThumbnailCache()
+
+    private final class Entry {
+        let image: CGImage
+        init(_ image: CGImage) { self.image = image }
+    }
+
+    private let cache: NSCache<NSString, Entry> = {
+        let cache = NSCache<NSString, Entry>()
+        cache.countLimit = 300
+        return cache
+    }()
+
+    static func key(url: URL, maxPixel: Int) -> String {
+        // Read from the file system: URL objects cache resource values.
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        return "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)|\(maxPixel)"
+    }
+
+    func image(for key: String) -> CGImage? { cache.object(forKey: key as NSString)?.image }
+
+    func insert(_ image: CGImage, for key: String) { cache.setObject(Entry(image), forKey: key as NSString) }
+
+    func removeAll() { cache.removeAllObjects() }
+
+    /// The cached thumbnail or a new one (stored for next time).
+    func thumbnail(url: URL, maxPixel: Int) -> CGImage? {
+        let key = Self.key(url: url, maxPixel: maxPixel)
+        if let cached = image(for: key) { return cached }
+        guard let made = Thumbnail.make(url: url, maxPixel: maxPixel) else { return nil }
+        insert(made, for: key)
+        return made
+    }
+}
+
+/// Square thumbnail, loaded off the main thread (and kept in `ThumbnailCache`).
 struct ThumbnailView: View {
     let url: URL
     let side: CGFloat
@@ -71,7 +110,9 @@ struct ThumbnailView: View {
             let pixels = Int(side * 3)
             let target = url
             failed = false
-            image = await Task.detached(priority: .utility) { Thumbnail.make(url: target, maxPixel: pixels) }.value
+            image = await Task.detached(priority: .utility) {
+                ThumbnailCache.shared.thumbnail(url: target, maxPixel: pixels)
+            }.value
             failed = image == nil
         }
         .accessibilityHidden(true)

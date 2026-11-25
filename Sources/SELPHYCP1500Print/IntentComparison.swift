@@ -1,7 +1,7 @@
 import Foundation
 
 /// Predicted result of one rendering intent for one photo.
-struct IntentResult: Equatable, Identifiable {
+struct IntentResult: Equatable, Identifiable, Sendable {
     var intent: RenderingIntent
     var meanDeltaE: Double
     var p95DeltaE: Double
@@ -38,7 +38,7 @@ enum IntentAdvisor {
 }
 
 /// One photo's row of the analysis table.
-struct PhotoAnalysisRow: Identifiable, Equatable {
+struct PhotoAnalysisRow: Identifiable, Equatable, Sendable {
     /// Gamut-loss threshold (C*) behind the "dull colours" share.
     static let gamutLossThreshold: Float = 8
 
@@ -52,6 +52,15 @@ struct PhotoAnalysisRow: Identifiable, Equatable {
 
     var id: URL { url }
     var name: String { url.lastPathComponent }
+
+    // Sort keys of the table columns (rows without statistics sort as the smallest values).
+    var sortMean: Double { statistics?.mean ?? -1 }
+    var sortMedian: Double { statistics?.median ?? -1 }
+    var sortP95: Double { statistics?.p95 ?? -1 }
+    var sortMax: Double { statistics?.max ?? -1 }
+    var sortNotReproducible: Double { statistics == nil ? -1 : shareNotReproducible }
+    var sortShadowsLost: Double { statistics == nil ? -1 : shareBelowDarkest }
+    var sortDullColours: Double { statistics == nil ? -1 : gamutLossShare }
 
     init(url: URL, statistics: DeviationStatistics? = nil, error: String? = nil) {
         self.url = url

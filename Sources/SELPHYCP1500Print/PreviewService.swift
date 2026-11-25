@@ -268,34 +268,6 @@ enum PreviewService {
         let maps: PixelMaps
     }
 
-    /// Intended and predicted Lab per pixel (same inputs as `selphy_analyze_photo`).
-    static func pixelMaps(
-        printerICC: Data, srgb: [UInt8], device: [UInt8], deltaE: [Float], width: Int, height: Int
-    ) throws -> PixelMaps {
-        let count = width * height
-        let srgb16 = srgb.map { UInt16($0) * 257 }
-        let device16 = device.map { UInt16($0) * 257 }
-        var intended = [Double](repeating: 0, count: count * 3)
-        var predicted = [Double](repeating: 0, count: count * 3)
-        let sourceStatus = selphy_source_to_lab(nil, 0, srgb16, &intended, count)
-        guard sourceStatus == SELPHY_OK else {
-            throw ColorCorrectionService.CorrectionError.transformCreation(String(cString: selphy_status_message(sourceStatus)))
-        }
-        let printerStatus: selphy_status = printerICC.withUnsafeBytes { bytes in
-            selphy_printer_predict_lab(
-                bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count,
-                SELPHY_INTENT_RELATIVE_COLORIMETRIC, device16, &predicted, count
-            )
-        }
-        guard printerStatus == SELPHY_OK else {
-            throw ColorCorrectionService.CorrectionError.transformCreation(String(cString: selphy_status_message(printerStatus)))
-        }
-        return PixelMaps(
-            width: width, height: height, deltaE: deltaE,
-            intendedLab: intended.map { Float($0) }, predictedLab: predicted.map { Float($0) }
-        )
-    }
-
     /// Runs the core checks on a reduced copy (see `analysisDimension`).
     static func analyse(
         printerICC: Data, srgbRGBX: Data, deviceRGBX: Data, width: Int, height: Int, correctedBlack: [UInt8]
@@ -305,11 +277,14 @@ enum PreviewService {
         let device = sampledRGB(deviceRGBX, width: width, height: height, factor: factor)
         let pixelCount = source.width * source.height
         var map = [Float](repeating: 0, count: pixelCount)
+        var intended = [Float](repeating: 0, count: pixelCount * 3)
+        var predicted = [Float](repeating: 0, count: pixelCount * 3)
         var raw = selphy_photo_stats()
+        // One pass gives the statistics, the dE00 map and the two Lab maps they come from.
         let status: selphy_status = printerICC.withUnsafeBytes { printerBytes in
-            selphy_analyze_photo(
+            selphy_analyze_photo_lab(
                 printerBytes.bindMemory(to: UInt8.self).baseAddress, printerBytes.count,
-                source.rgb, device.rgb, pixelCount, correctedBlack, &map, &raw
+                source.rgb, device.rgb, pixelCount, correctedBlack, &map, &intended, &predicted, &raw
             )
         }
         guard status == SELPHY_OK else {
@@ -324,9 +299,9 @@ enum PreviewService {
                 neutralP95Chroma: raw.neutral_p95_chroma >= 0 ? raw.neutral_p95_chroma : nil
             ),
             deltaEMap: map, width: source.width, height: source.height,
-            maps: try pixelMaps(
-                printerICC: printerICC, srgb: source.rgb, device: device.rgb,
-                deltaE: map, width: source.width, height: source.height
+            maps: PixelMaps(
+                width: source.width, height: source.height, deltaE: map,
+                intendedLab: intended, predictedLab: predicted
             )
         )
     }

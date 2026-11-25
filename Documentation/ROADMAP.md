@@ -143,6 +143,17 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - Implementation notes (0.0.3): the Statistics window (toolbar) shows the deviation distribution of the selected photo (histogram, median, 95th/99th percentile, shares above 1/2/3/6, split by lightness zone), the table of all loaded photos (worst first) and the three intents compared with a suggested one (lowest mean dE00, with caveats about shadows); CSV and PDF export. The preview has the views Dark zones (adjustable margin), Out of gamut (adjustable chroma loss), Postcard layout (Fit/Fill, cropped part dimmed), an adjustable dE scale with legend, zoom (Fit/100/200/400%) and a pixel readout. Everything is computed on a reduced copy (512 px) from the printer profile's model.
 - [ ] Open: the "out of gamut" overlay is a model heuristic (chroma the print loses against the intended colour), not a gamut-boundary test; check it against real prints on print day.
 
+### M5c - Performance and secondary windows (owner request, 2026-11-25; done in 0.0.4, to be checked on a Mac)
+- [x] Pointer readout no longer redraws the whole preview panel (the Dark zones / Out of gamut share was recomputed over every pixel at each pointer move); the share is computed with the overlay.
+- [x] One Lab pass: `selphy_analyze_photo_lab` returns the intended and predicted Lab with the statistics and the dE00 map (the app recomputed them with two extra unoptimised transforms, about 37% more analysis time; values are identical, checked by a core test).
+- [x] Statistics: a photo is decoded once for the three intents, photos are analysed 2-4 at a time, results are kept for the session (`AnalysisStore`, keyed by file, date, intent, BPC and profile digest).
+- [x] Thumbnail cache (`ThumbnailCache`, by path, date and size).
+- [x] Cache keys use a SHA-256 digest of the ICC profiles (`Data.hashValue` only looks at the first 80 bytes).
+- [x] Statistics is a window of its own (resizable, can stay open next to the preview, follows the previewed photo; a click in the table selects the photo in the main window too); sortable columns; histogram coloured by dE band with mean and 95th percentile marked; best intent highlighted with a "Use" button; progress counter; tooltips.
+- [x] Settings: rendering intent next to BPC (same setting as the main window), "Show in Finder" for the profile.
+- [x] About window: credits and the full LittleCMS MIT licence (also as `Licenses/LittleCMS-LICENSE.txt` in the bundle).
+- [ ] Open: confirm on a Mac that the Statistics window remembers its size and position, and the speed of the statistics with many photos.
+
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
 

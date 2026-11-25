@@ -1,5 +1,12 @@
 import Foundation
 import CoreGraphics
+import CryptoKit
+
+/// A content digest for cache keys. `Data.hashValue` is not enough: it only looks at the length
+/// and the first 80 bytes, which two different ICC profiles (same header) can share.
+enum ContentDigest {
+    static func of(_ data: Data) -> Data { Data(SHA256.hash(data: data)) }
+}
 
 /// Keeps the expensive stages of the preview in memory, so that changing a display option
 /// (paper white, black stretch) or switching back to a photo does not repeat the decoding, the
@@ -27,12 +34,12 @@ final class PreviewSession: @unchecked Sendable {
         let intent: RenderingIntent
         let blackPointCompensation: Bool
         let maxDimension: Int
-        let printerProfile: Int
+        let printerProfile: Data
     }
 
     private struct TransformKey: Hashable {
-        let printerProfile: Int
-        let displayProfile: Int
+        let printerProfile: Data
+        let displayProfile: Data?
         let simulatePaperWhite: Bool
         let blackPointCompensation: Bool
     }
@@ -155,14 +162,14 @@ final class PreviewSession: @unchecked Sendable {
         // Read the date from the file system: a URL object caches resource values, which would
         // hide a file that was edited elsewhere after the first read.
         let modified = (try? FileManager.default.attributesOfItem(atPath: sourceURL.path))?[.modificationDate] as? Date
-        let printerHash = printerICC.hashValue
+        let printerHash = ContentDigest.of(printerICC)
         let correctionKey = CorrectionKey(
             path: sourceURL.path, modified: modified, intent: options.intent,
             blackPointCompensation: options.blackPointCompensation,
             maxDimension: options.maxDimension, printerProfile: printerHash
         )
         let transformKey = TransformKey(
-            printerProfile: printerHash, displayProfile: display?.iccData.hashValue ?? 0,
+            printerProfile: printerHash, displayProfile: display.map { ContentDigest.of($0.iccData) },
             simulatePaperWhite: options.simulatePaperWhite,
             blackPointCompensation: options.previewBlackPointCompensation
         )
@@ -234,41 +241,55 @@ final class PreviewSession: @unchecked Sendable {
     func quickAnalysis(
         sourceURL: URL, printerICC: Data, intent: RenderingIntent, blackPointCompensation: Bool
     ) throws -> QuickAnalysis {
+        try quickAnalyses(sourceURL: sourceURL, printerICC: printerICC, intents: [intent],
+                          blackPointCompensation: blackPointCompensation)[0]
+    }
+
+    /// The same for several rendering intents, decoding the photo only once. Results are in the
+    /// order of `intents`.
+    func quickAnalyses(
+        sourceURL: URL, printerICC: Data, intents: [RenderingIntent], blackPointCompensation: Bool
+    ) throws -> [QuickAnalysis] {
         let hasAccess = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if hasAccess { sourceURL.stopAccessingSecurityScopedResource() }
         }
-        var options = PreviewService.Options(intent: intent, blackPointCompensation: blackPointCompensation)
-        options.maxDimension = PreviewService.analysisDimension
-        let stage = try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options)
-        return QuickAnalysis(
-            stats: stage.analysis.stats, maps: stage.analysis.maps,
-            effectiveBlackPointCompensation: stage.effectiveBlackPointCompensation
-        )
+        let decoded = try decode(sourceURL: sourceURL, maxDimension: PreviewService.analysisDimension)
+        return try intents.map { intent in
+            let corrected = try correct(decoded, printerICC: printerICC, intent: intent,
+                                        blackPointCompensation: blackPointCompensation)
+            return QuickAnalysis(
+                stats: corrected.analysis.stats, maps: corrected.analysis.maps,
+                effectiveBlackPointCompensation: corrected.effectiveBlackPointCompensation
+            )
+        }
     }
 
     // MARK: - Stages
 
-    private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options) throws -> CorrectionStage {
-        // Corrected device values: the same code path as the export, on a reduced copy.
-        let loaded = try ColorCorrectionService.loadSource(from: sourceURL, maxDimension: options.maxDimension)
-        let correctionTransform = try ColorCorrectionService.ColorTransform(
-            sourceICC: loaded.embeddedICC,
-            printerICC: printerICC,
-            intent: options.intent,
-            blackPointCompensation: options.blackPointCompensation
-        )
+    /// A decoded, reduced photo and its uncorrected device values.
+    private struct DecodedSource {
+        let loaded: ColorCorrectionService.LoadedSource
+        /// Oriented size.
+        let width: Int
+        let height: Int
+        /// The photo as sRGB numbers (oriented 8-bit RGBX), as any application would hand it to the printer.
+        let sRGBDevice: Data
+    }
+
+    private struct CorrectedSource {
+        let correctedDevice: Data
+        let analysis: PreviewService.Analysis
+        let effectiveBlackPointCompensation: Bool
+    }
+
+    private func decode(sourceURL: URL, maxDimension: Int) throws -> DecodedSource {
+        let loaded = try ColorCorrectionService.loadSource(from: sourceURL, maxDimension: maxDimension)
         let (width, height) = ColorCorrectionService.orientedSize(
             width: loaded.width, height: loaded.height, orientation: loaded.orientation
         )
-        let correctedDevice = try ColorCorrectionService.convertRGBX16Pixels(
-            loaded.pixels, width: loaded.width, height: loaded.height,
-            transform: correctionTransform, orientation: loaded.orientation
-        )
-
-        // Uncorrected device values: the photo as sRGB numbers, as any application would hand
-        // it to the printer. A source with its own profile is converted to sRGB first, like at
-        // export; for a source that is already sRGB the decoded pixels are reused.
+        // Uncorrected device values. A source with its own profile is converted to sRGB first,
+        // like at export; for a source that is already sRGB the decoded pixels are reused.
         let sRGBDevice: Data
         if loaded.embeddedICC == nil {
             sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
@@ -277,30 +298,58 @@ final class PreviewSession: @unchecked Sendable {
             )
         } else {
             let converted = try ColorCorrectionService.loadSource(
-                from: sourceURL, maxDimension: options.maxDimension, forceSRGB: true
+                from: sourceURL, maxDimension: maxDimension, forceSRGB: true
             )
             sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
                 converted.pixels, width: converted.width, height: converted.height,
                 transform: nil, orientation: converted.orientation
             )
         }
+        return DecodedSource(loaded: loaded, width: width, height: height, sRGBDevice: sRGBDevice)
+    }
 
+    private func correct(
+        _ decoded: DecodedSource, printerICC: Data, intent: RenderingIntent, blackPointCompensation: Bool
+    ) throws -> CorrectedSource {
+        // Corrected device values: the same code path as the export, on a reduced copy.
+        let loaded = decoded.loaded
+        let correctionTransform = try ColorCorrectionService.ColorTransform(
+            sourceICC: loaded.embeddedICC,
+            printerICC: printerICC,
+            intent: intent,
+            blackPointCompensation: blackPointCompensation
+        )
+        let correctedDevice = try ColorCorrectionService.convertRGBX16Pixels(
+            loaded.pixels, width: loaded.width, height: loaded.height,
+            transform: correctionTransform, orientation: loaded.orientation
+        )
         let analysis = try timed("analysis") {
             try PreviewService.analyse(
-                printerICC: printerICC, srgbRGBX: sRGBDevice, deviceRGBX: correctedDevice,
-                width: width, height: height,
+                printerICC: printerICC, srgbRGBX: decoded.sRGBDevice, deviceRGBX: correctedDevice,
+                width: decoded.width, height: decoded.height,
                 correctedBlack: PreviewService.correctedBlack(transform: correctionTransform)
             )
         }
+        return CorrectedSource(
+            correctedDevice: correctedDevice, analysis: analysis,
+            effectiveBlackPointCompensation: correctionTransform.effectiveBlackPointCompensation
+        )
+    }
+
+    private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options) throws -> CorrectionStage {
+        let decoded = try decode(sourceURL: sourceURL, maxDimension: options.maxDimension)
+        let corrected = try correct(decoded, printerICC: printerICC, intent: options.intent,
+                                    blackPointCompensation: options.blackPointCompensation)
+        let analysis = corrected.analysis
         let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
         return CorrectionStage(
-            width: width, height: height,
-            correctedDevice: correctedDevice, sRGBDevice: sRGBDevice,
-            original: try ColorCorrectionService.makeImage(rgbx: sRGBDevice, width: width, height: height, colorSpace: sRGB),
+            width: decoded.width, height: decoded.height,
+            correctedDevice: corrected.correctedDevice, sRGBDevice: decoded.sRGBDevice,
+            original: try ColorCorrectionService.makeImage(rgbx: decoded.sRGBDevice, width: decoded.width, height: decoded.height, colorSpace: sRGB),
             analysis: analysis,
             heatMap: try PreviewService.makeHeatMap(deltaE: analysis.deltaEMap, width: analysis.width, height: analysis.height),
-            sourceDescription: PreviewService.describe(loaded),
-            effectiveBlackPointCompensation: correctionTransform.effectiveBlackPointCompensation
+            sourceDescription: PreviewService.describe(decoded.loaded),
+            effectiveBlackPointCompensation: corrected.effectiveBlackPointCompensation
         )
     }
 

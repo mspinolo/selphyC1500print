@@ -151,6 +151,18 @@ selphy_status selphy_analyze_photo(
     const uint8_t corrected_black_rgb8[3],
     float *de_map, selphy_photo_stats *out_stats);
 
+/* As selphy_analyze_photo, and also returns the two CIELab values (D50, L*, a*, b*; three floats
+   per pixel) the deviations are computed from: intended_lab = the source read as sRGB,
+   predicted_lab = the printer's A2B model of the device values. Each of de_map, intended_lab and
+   predicted_lab is optional (NULL). Saves a second Lab pass and keeps the per-pixel values
+   exactly consistent with the dE00 map and the statistics. */
+selphy_status selphy_analyze_photo_lab(
+    const uint8_t *printer_icc, size_t printer_icc_size,
+    const uint8_t *srgb_rgb8, const uint8_t *device_rgb8, size_t pixel_count,
+    const uint8_t corrected_black_rgb8[3],
+    float *de_map, float *intended_lab, float *predicted_lab,
+    selphy_photo_stats *out_stats);
+
 const char *selphy_status_message(selphy_status status);
 
 /* Encoded version of the linked LittleCMS (e.g. 2200 for 2.20). */

@@ -2,7 +2,8 @@ import SwiftUI
 import Charts
 import UniformTypeIdentifiers
 
-/// Computes the statistics table and the intent comparison off the main thread.
+/// Computes the statistics table and the intent comparison off the main thread, through the
+/// session-wide `AnalysisStore` (results already computed are reused).
 @MainActor
 final class StatisticsModel: ObservableObject {
     @Published private(set) var rows: [PhotoAnalysisRow] = []
@@ -10,60 +11,91 @@ final class StatisticsModel: ObservableObject {
     @Published private(set) var done = 0
     @Published private(set) var total = 0
     @Published private(set) var isWorking = false
-    @Published private(set) var message: String?
 
-    func loadRows(photos: [URL], printerICC: Data, intent: RenderingIntent, blackPointCompensation: Bool) async {
+    let store: AnalysisStore
+
+    init(store: AnalysisStore = .shared) {
+        self.store = store
+    }
+
+    /// Photos analysed at the same time. Each analysis already uses several cores for the colour
+    /// conversion, so a few in parallel are enough to keep the machine busy.
+    static var parallelism: Int { max(1, min(4, ProcessInfo.processInfo.activeProcessorCount / 2)) }
+
+    func loadRows(photos: [URL], printerICC: Data, profileDigest: Data, intent: RenderingIntent,
+                  blackPointCompensation: Bool) async {
         isWorking = true
         defer { isWorking = false }
         rows = []
         done = 0
         total = photos.count
-        var collected: [PhotoAnalysisRow] = []
-        for url in photos {
-            if Task.isCancelled { return }
-            let row = await Task.detached(priority: .utility) { () -> PhotoAnalysisRow in
-                do {
-                    let analysis = try PreviewSession().quickAnalysis(
-                        sourceURL: url, printerICC: printerICC, intent: intent, blackPointCompensation: blackPointCompensation)
-                    return PhotoAnalysisRow.make(url: url, analysis: analysis)
-                } catch {
-                    return PhotoAnalysisRow(url: url, error: error.localizedDescription)
+        let store = store
+        var byURL: [URL: PhotoAnalysisRow] = [:]
+        await withTaskGroup(of: (URL, PhotoAnalysisRow).self) { group in
+            var next = 0
+            while next < min(Self.parallelism, photos.count) {
+                let url = photos[next]
+                next += 1
+                group.addTask(priority: .utility) {
+                    Self.row(url: url, store: store, printerICC: printerICC, profileDigest: profileDigest,
+                             intent: intent, blackPointCompensation: blackPointCompensation)
                 }
-            }.value
-            collected.append(row)
-            rows = collected
-            done += 1
+            }
+            while let result = await group.next() {
+                if Task.isCancelled {
+                    group.cancelAll()
+                    return
+                }
+                byURL[result.0] = result.1
+                rows = photos.compactMap { byURL[$0] }
+                done += 1
+                if next < photos.count {
+                    let url = photos[next]
+                    next += 1
+                    group.addTask(priority: .utility) {
+                        Self.row(url: url, store: store, printerICC: printerICC, profileDigest: profileDigest,
+                                 intent: intent, blackPointCompensation: blackPointCompensation)
+                    }
+                }
+            }
         }
     }
 
-    func loadIntents(photo: URL?, printerICC: Data, blackPointCompensation: Bool) async {
+    nonisolated private static func row(
+        url: URL, store: AnalysisStore, printerICC: Data, profileDigest: Data, intent: RenderingIntent,
+        blackPointCompensation: Bool
+    ) -> (URL, PhotoAnalysisRow) {
+        let entry = store.entries(url: url, printerICC: printerICC, profileDigest: profileDigest,
+                                  intents: [intent], blackPointCompensation: blackPointCompensation)[0]
+        return (url, entry.row)
+    }
+
+    func loadIntents(photo: URL?, printerICC: Data, profileDigest: Data, blackPointCompensation: Bool) async {
         intentResults = []
         guard let photo else { return }
-        var results: [IntentResult] = []
-        for intent in RenderingIntent.allCases {
-            if Task.isCancelled { return }
-            let result = await Task.detached(priority: .utility) { () -> IntentResult? in
-                guard let analysis = try? PreviewSession().quickAnalysis(
-                    sourceURL: photo, printerICC: printerICC, intent: intent, blackPointCompensation: blackPointCompensation)
-                else { return nil }
-                return PhotoAnalysisRow.result(for: analysis, intent: intent)
-            }.value
-            if let result { results.append(result) }
-            intentResults = results
-        }
+        let store = store
+        let entries = await Task.detached(priority: .utility) {
+            store.entries(url: photo, printerICC: printerICC, profileDigest: profileDigest,
+                          intents: RenderingIntent.allCases, blackPointCompensation: blackPointCompensation)
+        }.value
+        if Task.isCancelled { return }
+        intentResults = entries.compactMap(\.result)
     }
 }
 
-/// The statistics sheet: deviation distribution of the selected photo, a table of all the loaded
-/// photos, the comparison of the three rendering intents, and CSV/PDF export.
+/// The Statistics window: deviation distribution of the selected photo, the comparison of the three
+/// rendering intents, a sortable table of all the loaded photos (a click selects the photo in the
+/// main window too), and CSV/PDF export. It can stay open next to the main window.
 struct StatisticsView: View {
+    static let windowID = "statistics"
+
     @EnvironmentObject private var settings: AppSettings
-    @Environment(\.dismiss) private var dismiss
-    let photos: [URL]
-    @State private var selected: URL?
+    @EnvironmentObject private var selection: PhotoSelection
     @StateObject private var model = StatisticsModel()
     @State private var printerICC: Data?
+    @State private var profileDigest: Data?
     @State private var errorMessage: String?
+    @State private var sortOrder = [KeyPathComparator(\PhotoAnalysisRow.sortMean, order: .reverse)]
 
     private struct RowsKey: Equatable {
         var photos: [URL]
@@ -78,56 +110,84 @@ struct StatisticsView: View {
         var profile: Data?
     }
 
-    init(photos: [URL], selected: URL?) {
-        self.photos = photos
-        _selected = State(initialValue: selected)
-    }
-
+    private var photos: [URL] { selection.photos }
+    private var selected: URL? { selection.selected }
     private var selectedRow: PhotoAnalysisRow? { model.rows.first { $0.url == selected } }
+    private var sortedRows: [PhotoAnalysisRow] { model.rows.sorted(using: sortOrder) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    detail
-                    intents
+            if photos.isEmpty {
+                placeholder
+            } else {
+                VSplitView {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            detail
+                            intents
+                            Text(tr("Computed on a reduced copy of each photo, from the printer profile's model: estimates, not print measurements."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.trailing, 6)
+                        .padding(.bottom, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(minHeight: 260)
                     table
-                    Text(tr("Computed on a reduced copy of each photo, from the printer profile's model: estimates, not print measurements."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                        .frame(minHeight: 150)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(18)
+        .padding(16)
         .frame(minWidth: 760, minHeight: 560)
+        .navigationTitle(tr("Colour deviation statistics"))
         .onAppear { loadProfile() }
-        .task(id: RowsKey(photos: photos, intent: settings.renderingIntent, bpc: settings.blackPointCompensation, profile: settings.profileBookmark)) {
-            guard let printerICC else { return }
-            await model.loadRows(photos: photos, printerICC: printerICC, intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation)
+        .onChange(of: settings.profileBookmark) { loadProfile() }
+        .task(id: RowsKey(photos: photos, intent: settings.renderingIntent, bpc: settings.blackPointCompensation, profile: profileDigest)) {
+            guard let printerICC, let profileDigest else { return }
+            await model.loadRows(photos: photos, printerICC: printerICC, profileDigest: profileDigest,
+                                 intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation)
         }
-        .task(id: IntentsKey(photo: selected, bpc: settings.blackPointCompensation, profile: settings.profileBookmark)) {
-            guard let printerICC else { return }
-            await model.loadIntents(photo: selected, printerICC: printerICC, blackPointCompensation: settings.blackPointCompensation)
+        .task(id: IntentsKey(photo: selected, bpc: settings.blackPointCompensation, profile: profileDigest)) {
+            guard let printerICC, let profileDigest else { return }
+            await model.loadIntents(photo: selected, printerICC: printerICC, profileDigest: profileDigest,
+                                    blackPointCompensation: settings.blackPointCompensation)
         }
     }
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text(tr("Colour deviation statistics")).font(.title3.weight(.semibold))
+            Text(trf("Rendering intent in use: %@", settings.renderingIntent.title))
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Spacer()
             if model.isWorking {
                 ProgressView(value: Double(model.done), total: Double(max(1, model.total)))
                     .frame(width: 90)
+                Text(trf("Analysing %d of %d", min(model.done + 1, model.total), model.total))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
             Button(tr("Export CSV…")) { export(csv: true) }.disabled(model.rows.isEmpty)
             Button(tr("Export PDF…")) { export(csv: false) }.disabled(model.rows.isEmpty)
-            Button(tr("Close")) { dismiss() }.keyboardShortcut(.cancelAction)
         }
+    }
+
+    private var placeholder: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "chart.bar")
+                .font(.system(size: 40))
+                .foregroundStyle(.tertiary)
+            Text(tr("Add photos in the main window to see their statistics."))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Sections
@@ -136,55 +196,24 @@ struct StatisticsView: View {
     private var detail: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                if photos.count > 1 {
-                    Picker(tr("Photo"), selection: $selected) {
-                        ForEach(photos, id: \.self) { url in
-                            Text(url.lastPathComponent).tag(Optional(url))
-                        }
-                    }
-                    .frame(maxWidth: 360)
-                }
                 if let row = selectedRow, let s = row.statistics {
                     HStack(spacing: 18) {
-                        metric(tr("Mean"), s.mean)
-                        metric(tr("Median"), s.median)
-                        metric(tr("95th pct"), s.p95)
-                        metric(tr("99th pct"), s.p99)
-                        metric(tr("Max"), s.max)
+                        metric(tr("Mean"), s.mean, help: tr("Average predicted ΔE00 over the pixels of the photo."))
+                        metric(tr("Median"), s.median, help: tr("Half of the pixels deviate less than this."))
+                        metric(tr("95th pct"), s.p95, help: tr("95% of the pixels deviate less than this: it describes the worst areas."))
+                        metric(tr("99th pct"), s.p99, help: tr("99% of the pixels deviate less than this."))
+                        metric(tr("Max"), s.max, help: tr("The largest deviation of a single pixel, often an isolated saturated colour."))
                     }
                     HStack(spacing: 14) {
                         ForEach(Array(zip(s.thresholds, s.shareAbove)), id: \.0) { threshold, share in
                             Text(trf("ΔE00 above %.0f: %.0f%%", Double(threshold), share * 100)).font(.caption)
                         }
                     }
-                    Chart(s.histogram) { bin in
-                        BarMark(
-                            xStart: .value("from", bin.lower), xEnd: .value("to", bin.upper),
-                            y: .value("share", bin.share * 100)
-                        )
-                    }
-                    .chartXAxisLabel(tr("ΔE00 (the last bar collects everything above)"))
-                    .chartYAxisLabel(tr("% of pixels"))
-                    .frame(height: 150)
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
-                        GridRow {
-                            Text(tr("Lightness zone")).bold()
-                            Text(tr("Pixels")).bold()
-                            Text(tr("Mean")).bold()
-                            Text(tr("95th pct")).bold()
-                            Text(tr("ΔE > 3")).bold()
-                        }
-                        ForEach(s.zones, id: \.zone) { zone in
-                            GridRow {
-                                Text(zone.zone.title)
-                                Text(String(format: "%.0f%%", zone.share * 100))
-                                Text(String(format: "%.1f", zone.mean))
-                                Text(String(format: "%.1f", zone.p95))
-                                Text(String(format: "%.0f%%", zone.shareAbove * 100))
-                            }
-                        }
-                    }
-                    .font(.caption)
+                    histogram(s)
+                    Text(tr("As a guide: ΔE00 around 1 is at the limit of visibility, 2 to 3 is visible side by side, above 6 the colour looks clearly different."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    zones(s)
                 } else if let error = selectedRow?.error {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 } else {
@@ -194,8 +223,73 @@ struct StatisticsView: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Text(selected?.lastPathComponent ?? tr("Photo"))
+            if photos.count > 1 {
+                Picker(tr("Photo"), selection: $selection.selected) {
+                    ForEach(photos, id: \.self) { url in
+                        Text(url.lastPathComponent).tag(Optional(url))
+                    }
+                }
+                .frame(maxWidth: 380)
+            } else {
+                Text(selected?.lastPathComponent ?? tr("Photo"))
+            }
         }
+    }
+
+    private func histogram(_ s: DeviationStatistics) -> some View {
+        let upper = s.histogram.last?.upper ?? 12
+        return Chart {
+            ForEach(s.histogram) { bin in
+                BarMark(
+                    xStart: .value("from", bin.lower), xEnd: .value("to", bin.upper),
+                    y: .value("share", bin.share * 100)
+                )
+                .foregroundStyle(by: .value("band", DeviationBand.band(forLower: bin.lower).title))
+            }
+            RuleMark(x: .value("mean", min(s.mean, upper)))
+                .foregroundStyle(Color.primary.opacity(0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .annotation(position: .top, alignment: .leading) {
+                    Text(tr("mean")).font(.caption2).foregroundStyle(.secondary)
+                }
+            RuleMark(x: .value("p95", min(s.p95, upper)))
+                .foregroundStyle(Color.primary.opacity(0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [1, 2]))
+                .annotation(position: .top, alignment: .trailing) {
+                    Text(tr("95th pct")).font(.caption2).foregroundStyle(.secondary)
+                }
+        }
+        .chartForegroundStyleScale(
+            domain: DeviationBand.allCases.map(\.title),
+            range: DeviationBand.allCases.map(\.color)
+        )
+        .chartXScale(domain: 0...upper)
+        .chartXAxisLabel(tr("ΔE00 (the last bar collects everything above)"))
+        .chartYAxisLabel(tr("% of pixels"))
+        .chartLegend(position: .bottom, alignment: .leading)
+        .frame(height: 190)
+    }
+
+    private func zones(_ s: DeviationStatistics) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+            GridRow {
+                Text(tr("Lightness zone")).bold()
+                Text(tr("Pixels")).bold()
+                Text(tr("Mean")).bold()
+                Text(tr("95th pct")).bold()
+                Text(tr("ΔE > 3")).bold().help(tr("Share of the zone's pixels with a predicted ΔE00 above 3."))
+            }
+            ForEach(s.zones, id: \.zone) { zone in
+                GridRow {
+                    Text(zone.zone.title)
+                    Text(String(format: "%.0f%%", zone.share * 100))
+                    Text(String(format: "%.1f", zone.mean))
+                    Text(String(format: "%.1f", zone.p95))
+                    Text(String(format: "%.0f%%", zone.shareAbove * 100))
+                }
+            }
+        }
+        .font(.caption)
     }
 
     @ViewBuilder
@@ -205,31 +299,48 @@ struct StatisticsView: View {
                 if model.intentResults.isEmpty {
                     Text(tr("Computing…")).foregroundStyle(.secondary)
                 } else {
+                    let complete = model.intentResults.count == RenderingIntent.allCases.count
+                    let best = complete ? IntentAdvisor.best(model.intentResults) : nil
                     Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                         GridRow {
+                            Text("")
                             Text(tr("Intent")).bold()
                             Text(tr("Mean")).bold()
                             Text(tr("95th pct")).bold()
-                            Text(tr("ΔE > 3")).bold()
-                            Text(tr("Shadows lost")).bold()
-                            Text(tr("Dull colours")).bold()
+                            Text(tr("ΔE > 3")).bold().help(tr("Share of pixels with a predicted ΔE00 above 3."))
+                            Text(tr("Shadows lost")).bold().help(tr("Share of pixels darker than the darkest tone the print reproduces."))
+                            Text(tr("Dull colours")).bold().help(tr("Share of pixels whose chroma the print reduces by more than C* 8."))
                         }
                         ForEach(model.intentResults) { result in
+                            let isBest = result.intent == best?.intent
+                            let weight: Font.Weight = isBest ? .semibold : .regular
                             GridRow {
-                                Text(result.intent.title)
-                                Text(String(format: "%.1f", result.meanDeltaE))
-                                Text(String(format: "%.1f", result.p95DeltaE))
-                                Text(String(format: "%.0f%%", result.shareNotReproducible * 100))
-                                Text(String(format: "%.0f%%", result.shareBelowDarkest * 100))
-                                Text(String(format: "%.0f%%", result.gamutLossShare * 100))
+                                Image(systemName: isBest ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(isBest ? Color.green : Color.secondary.opacity(0.4))
+                                HStack(spacing: 4) {
+                                    Text(result.intent.title).fontWeight(weight)
+                                    if result.intent == settings.renderingIntent {
+                                        Text(tr("in use")).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(String(format: "%.1f", result.meanDeltaE)).fontWeight(weight)
+                                Text(String(format: "%.1f", result.p95DeltaE)).fontWeight(weight)
+                                Text(String(format: "%.0f%%", result.shareNotReproducible * 100)).fontWeight(weight)
+                                Text(String(format: "%.0f%%", result.shareBelowDarkest * 100)).fontWeight(weight)
+                                Text(String(format: "%.0f%%", result.gamutLossShare * 100)).fontWeight(weight)
                             }
                         }
                     }
                     .font(.caption)
-                    if model.intentResults.count == RenderingIntent.allCases.count,
-                       let best = IntentAdvisor.best(model.intentResults) {
-                        Label(IntentAdvisor.explanation(for: best, among: model.intentResults), systemImage: "lightbulb")
-                            .font(.callout)
+                    if let best {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Label(IntentAdvisor.explanation(for: best, among: model.intentResults), systemImage: "lightbulb")
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button(trf("Use %@", best.intent.title)) { settings.renderingIntent = best.intent }
+                                .disabled(settings.renderingIntent == best.intent)
+                                .help(tr("Sets this rendering intent for the preview and the copies."))
+                        }
                         Text(tr("The suggestion is based on the predicted deviation only: judge shadows and saturated colours in the Dark zones and Out of gamut views, and confirm with a print."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -241,28 +352,31 @@ struct StatisticsView: View {
         }
     }
 
-    @ViewBuilder
     private var table: some View {
-        GroupBox(tr("All loaded photos")) {
-            Table(model.rows.sorted { ($0.statistics?.mean ?? 0) > ($1.statistics?.mean ?? 0) }) {
-                TableColumn(tr("Photo")) { Text($0.name).lineLimit(1) }
-                TableColumn(tr("Mean")) { Text($0.statistics.map { String(format: "%.1f", $0.mean) } ?? "—") }
-                TableColumn(tr("Median")) { Text($0.statistics.map { String(format: "%.1f", $0.median) } ?? "—") }
-                TableColumn(tr("95th pct")) { Text($0.statistics.map { String(format: "%.1f", $0.p95) } ?? "—") }
-                TableColumn(tr("Max")) { Text($0.statistics.map { String(format: "%.1f", $0.max) } ?? "—") }
-                TableColumn(tr("ΔE > 3")) { Text($0.statistics == nil ? "—" : String(format: "%.0f%%", $0.shareNotReproducible * 100)) }
-                TableColumn(tr("Shadows lost")) { Text($0.statistics == nil ? "—" : String(format: "%.0f%%", $0.shareBelowDarkest * 100)) }
-                TableColumn(tr("Dull colours")) { Text($0.statistics == nil ? "—" : String(format: "%.0f%%", $0.gamutLossShare * 100)) }
+        VStack(alignment: .leading, spacing: 6) {
+            Text(tr("All loaded photos")).font(.headline)
+            Table(sortedRows, selection: $selection.selected, sortOrder: $sortOrder) {
+                TableColumn(tr("Photo"), value: \.name) { Text($0.name).lineLimit(1) }
+                TableColumn(tr("Mean"), value: \.sortMean) { Text($0.statistics.map { String(format: "%.1f", $0.mean) } ?? "—") }
+                TableColumn(tr("Median"), value: \.sortMedian) { Text($0.statistics.map { String(format: "%.1f", $0.median) } ?? "—") }
+                TableColumn(tr("95th pct"), value: \.sortP95) { Text($0.statistics.map { String(format: "%.1f", $0.p95) } ?? "—") }
+                TableColumn(tr("Max"), value: \.sortMax) { Text($0.statistics.map { String(format: "%.1f", $0.max) } ?? "—") }
+                TableColumn(tr("ΔE > 3"), value: \.sortNotReproducible) { Text($0.statistics == nil ? "—" : String(format: "%.0f%%", $0.shareNotReproducible * 100)) }
+                TableColumn(tr("Shadows lost"), value: \.sortShadowsLost) { Text($0.statistics == nil ? "—" : String(format: "%.0f%%", $0.shareBelowDarkest * 100)) }
+                TableColumn(tr("Dull colours"), value: \.sortDullColours) { Text($0.statistics == nil ? "—" : String(format: "%.0f%%", $0.gamutLossShare * 100)) }
             }
-            .frame(minHeight: 120, maxHeight: 240)
+            Text(tr("Click a photo to show it here and in the main window; click a column title to sort."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
-    private func metric(_ title: String, _ value: Double) -> some View {
+    private func metric(_ title: String, _ value: Double, help: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(String(format: "%.1f", value)).font(.title3.monospacedDigit())
         }
+        .help(help)
     }
 
     // MARK: Profile and export
@@ -270,13 +384,20 @@ struct StatisticsView: View {
     private func loadProfile() {
         do {
             guard let url = try settings.resolveProfileURL() else {
+                printerICC = nil
+                profileDigest = nil
                 errorMessage = tr("Choose the ICC profile to see the preview.")
                 return
             }
             let hasAccess = url.startAccessingSecurityScopedResource()
             defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-            printerICC = try Data(contentsOf: url)
+            let data = try Data(contentsOf: url)
+            printerICC = data
+            profileDigest = ContentDigest.of(data)
+            errorMessage = nil
         } catch {
+            printerICC = nil
+            profileDigest = nil
             errorMessage = trf("Unable to access the ICC profile: %@", error.localizedDescription)
         }
     }
@@ -303,6 +424,17 @@ struct StatisticsView: View {
             errorMessage = nil
         } catch {
             errorMessage = trf("Saving failed: %@", error.localizedDescription)
+        }
+    }
+}
+
+extension DeviationBand {
+    var color: Color {
+        switch self {
+        case .belowOne: Color(red: 0.36, green: 0.67, blue: 0.42)
+        case .oneToThree: Color(red: 0.93, green: 0.78, blue: 0.20)
+        case .threeToSix: Color(red: 0.95, green: 0.52, blue: 0.16)
+        case .sixAndAbove: Color(red: 0.85, green: 0.22, blue: 0.18)
         }
     }
 }

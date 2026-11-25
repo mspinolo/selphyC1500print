@@ -19,6 +19,11 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/SELPHYCP1500Print"
 cp Packaging/Info.plist "$app/Contents/Info.plist"
 cp Packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+# About window credits, and the full licence text of the vendored LittleCMS (MIT: the notice must
+# accompany every copy).
+cp Packaging/Credits.rtf "$app/Contents/Resources/Credits.rtf"
+mkdir -p "$app/Contents/Resources/Licenses"
+cp Sources/CLittleCMS/LICENSE "$app/Contents/Resources/Licenses/LittleCMS-LICENSE.txt"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 plutil -lint "$app/Contents/Info.plist"
 

@@ -1,6 +1,8 @@
 import SwiftUI
+import AppKit
 
-/// The Settings window (⌘,): profile, black point compensation, language, print notice.
+/// The Settings window (⌘,): profile, rendering intent and black point compensation, language,
+/// print notice. The rendering intent is the same setting as the picker in the main window.
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var showingProfilePicker = false
@@ -29,6 +31,7 @@ struct SettingsView: View {
                     Spacer()
                     Button(tr("Choose profile…")) { showingProfilePicker = true }
                     if !settings.profileDisplayName.isEmpty {
+                        Button(tr("Show in Finder")) { revealProfile() }
                         Button(tr("Remove"), role: .destructive) {
                             settings.clearProfile()
                             profileReport = nil
@@ -49,6 +52,14 @@ struct SettingsView: View {
             }
 
             Section(tr("Colour management")) {
+                Picker(tr("Rendering intent"), selection: $settings.renderingIntent) {
+                    ForEach(RenderingIntent.allCases) { intent in
+                        Text(intent.title).tag(intent)
+                    }
+                }
+                Text(settings.renderingIntent.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle(
                     tr("Black point compensation (BPC)"),
                     isOn: blackPointCompensationForced ? .constant(true) : $settings.blackPointCompensation
@@ -86,6 +97,19 @@ struct SettingsView: View {
             allowsMultipleSelection: false,
             onCompletion: handleProfileSelection
         )
+    }
+
+    /// Selects the remembered profile in a Finder window.
+    private func revealProfile() {
+        do {
+            guard let url = try settings.resolveProfileURL() else { return }
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            profileFailed = true
+            profileMessage = trf("The remembered profile can no longer be read: %@", error.localizedDescription)
+        }
     }
 
     /// Shows again the report of the remembered profile after a restart.

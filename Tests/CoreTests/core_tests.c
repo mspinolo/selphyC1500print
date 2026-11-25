@@ -645,6 +645,47 @@ static void test_analysis_primaries_and_map(const uint8_t *prn, size_t prn_n) {
     CHECK(raw.mean_de > 2.0 * st.mean_de, "uncorrected must be at least twice as far from the original");
 }
 
+
+/* The Lab outputs of selphy_analyze_photo_lab: same statistics as selphy_analyze_photo, values
+   close to the independent (unoptimised) Lab functions, dE00 recomputed from them matches the map. */
+static void test_analysis_lab_outputs(const uint8_t *prn, size_t prn_n) {
+    enum { N = 512 };
+    uint8_t src[N * 3], dev[N * 3];
+    unsigned seed = 7;
+    for (int i = 0; i < N * 3; i++) { seed = seed * 1103515245u + 12345u; src[i] = (uint8_t)(seed >> 16); }
+    correct8(prn, prn_n, src, dev, N);
+    uint8_t kb[3];
+    corrected_black(prn, prn_n, kb);
+    selphy_photo_stats a, b;
+    float map_a[N], map_b[N], intended[N * 3], predicted[N * 3];
+    CHECK(selphy_analyze_photo(prn, prn_n, src, dev, N, kb, map_a, &a) == SELPHY_OK, "analyze");
+    CHECK(selphy_analyze_photo_lab(prn, prn_n, src, dev, N, kb, map_b, intended, predicted, &b) == SELPHY_OK, "analyze lab");
+    CHECK(memcmp(&a, &b, sizeof a) == 0 && memcmp(map_a, map_b, sizeof map_a) == 0, "same stats and map with and without Lab outputs");
+    CHECK(selphy_analyze_photo_lab(prn, prn_n, src, dev, N, kb, NULL, NULL, NULL, &b) == SELPHY_OK, "all outputs optional");
+    CHECK(memcmp(&a, &b, sizeof a) == 0, "same stats without maps");
+
+    uint16_t s16[N * 3], d16[N * 3];
+    for (int i = 0; i < N * 3; i++) { s16[i] = (uint16_t)(src[i] * 257); d16[i] = (uint16_t)(dev[i] * 257); }
+    static double ref_i[N * 3], ref_p[N * 3];
+    CHECK(selphy_source_to_lab(NULL, 0, s16, ref_i, N) == SELPHY_OK, "reference intended");
+    CHECK(selphy_printer_predict_lab(prn, prn_n, SELPHY_INTENT_RELATIVE_COLORIMETRIC, d16, ref_p, N) == SELPHY_OK, "reference predicted");
+    double worst_i = 0, worst_p = 0, worst_de = 0;
+    for (int p = 0; p < N; p++) {
+        double li[3] = { intended[p * 3], intended[p * 3 + 1], intended[p * 3 + 2] };
+        double lp[3] = { predicted[p * 3], predicted[p * 3 + 1], predicted[p * 3 + 2] };
+        double ri[3] = { ref_i[p * 3], ref_i[p * 3 + 1], ref_i[p * 3 + 2] };
+        double rp[3] = { ref_p[p * 3], ref_p[p * 3 + 1], ref_p[p * 3 + 2] };
+        double di = selphy_delta_e2000(li, ri), dp = selphy_delta_e2000(lp, rp);
+        double dd = fabs(selphy_delta_e2000(li, lp) - map_b[p]);
+        if (di > worst_i) worst_i = di;
+        if (dp > worst_p) worst_p = dp;
+        if (dd > worst_de) worst_de = dd;
+    }
+    printf("analysis Lab outputs: worst dE00 vs reference intended %.4f, predicted %.4f; map mismatch %.5f\n", worst_i, worst_p, worst_de);
+    CHECK(worst_i < 0.2 && worst_p < 0.5, "Lab outputs close to the unoptimised reference (%.4f, %.4f)", worst_i, worst_p);
+    CHECK(worst_de < 1e-3, "dE00 from the Lab outputs matches the map (%.5f)", worst_de);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <printer-profile.icc>\n", argv[0]);
@@ -675,6 +716,7 @@ int main(int argc, char **argv) {
     test_analysis_white_and_midgrey(prn, prn_n);
     test_analysis_neutral_ramp(prn, prn_n);
     test_analysis_primaries_and_map(prn, prn_n);
+    test_analysis_lab_outputs(prn, prn_n);
 
     free(prn);
     printf("%d checks, %d failures\n", checks, failures);

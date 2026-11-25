@@ -66,8 +66,12 @@ struct PreviewPanel: View {
     @State private var shadowMargin = 0.0
     @State private var gamutLoss = 8.0
     @State private var overlay: CGImage?
+    /// Share of highlighted pixels in the Dark zones / Out of gamut views, computed with the overlay.
+    @State private var overlayShare: Double?
     @State private var generation = 0
-    @State private var reading: PixelReading?
+    /// The pointer readout lives in its own object, held without observing it: pointer moves then
+    /// redraw only the readout line, not the whole panel (images, overlays, controls).
+    @State private var pointer = PointerReadout()
     /// Keeps the decoded/corrected buffers and renderings between re-renders.
     @State private var session = PreviewSession()
 
@@ -131,7 +135,7 @@ struct PreviewPanel: View {
         }
         .task(id: renderKey) { await render() }
         .onChange(of: overlayKey) { recomputeOverlay() }
-        .onChange(of: photo) { reading = nil }
+        .onChange(of: photo) { pointer.reading = nil }
     }
 
     private func placeholder(_ text: String, symbol: String) -> some View {
@@ -219,7 +223,7 @@ struct PreviewPanel: View {
         case .shadows:
             if let preview {
                 let darkest = preview.stats.darkestToneL
-                let share = Overlays.shadowShare(preview.maps, darkestL: darkest, margin: shadowMargin)
+                let share = overlayShare ?? 0
                 HStack(spacing: 10) {
                     Text(tr("Margin above the darkest tone")).font(.caption)
                     Slider(value: $shadowMargin, in: 0...15, step: 0.5)
@@ -231,8 +235,8 @@ struct PreviewPanel: View {
                 }
             }
         case .gamut:
-            if let preview {
-                let share = Overlays.gamutShare(preview.maps, minimumLoss: Float(gamutLoss))
+            if preview != nil {
+                let share = overlayShare ?? 0
                 HStack(spacing: 10) {
                     Text(tr("Chroma lost above")).font(.caption)
                     Slider(value: $gamutLoss, in: 2...30, step: 1)
@@ -320,25 +324,10 @@ struct PreviewPanel: View {
 
     private func updateReading(_ point: CGPoint?, preview: PreviewService.Preview) {
         let next = point.flatMap { PreviewGeometry.reading(maps: preview.maps, u: Double($0.x), v: Double($0.y)) }
-        if next != reading { reading = next }
+        if next != pointer.reading { pointer.reading = next }
     }
 
-    /// The colour under the pointer: what the photo should look like and what the model predicts in print.
-    private var readout: some View {
-        Group {
-            if let reading {
-                Text(trf("Original L* %.1f a* %.1f b* %.1f  →  print L* %.1f a* %.1f b* %.1f  ·  ΔE00 %.1f",
-                         reading.intended.l, reading.intended.a, reading.intended.b,
-                         reading.predicted.l, reading.predicted.a, reading.predicted.b, reading.deltaE))
-            } else {
-                Text(tr("Move the pointer over the photo to read the colour of a point."))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.caption.monospacedDigit())
-        .lineLimit(1)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    private var readout: some View { ReadoutLine(pointer: pointer) }
 
     @ViewBuilder
     private var notes: some View {
@@ -365,16 +354,21 @@ struct PreviewPanel: View {
     }
 
     private func recomputeOverlay() {
-        guard let preview else { overlay = nil; return }
+        guard let preview else { overlay = nil; overlayShare = nil; return }
         switch mode {
         case .heatMap:
             overlay = Overlays.heatMap(preview.maps, scale: deltaEScale)
+            overlayShare = nil
         case .shadows:
-            overlay = Overlays.shadowMask(preview.maps, darkestL: preview.stats.darkestToneL, margin: shadowMargin)
+            let darkest = preview.stats.darkestToneL
+            overlay = Overlays.shadowMask(preview.maps, darkestL: darkest, margin: shadowMargin)
+            overlayShare = Overlays.shadowShare(preview.maps, darkestL: darkest, margin: shadowMargin)
         case .gamut:
             overlay = Overlays.gamutMask(preview.maps, minimumLoss: Float(gamutLoss))
+            overlayShare = Overlays.gamutShare(preview.maps, minimumLoss: Float(gamutLoss))
         default:
             overlay = nil
+            overlayShare = nil
         }
     }
 
@@ -410,6 +404,7 @@ struct PreviewPanel: View {
             if Task.isCancelled { return }
             preview = nil
             overlay = nil
+            overlayShare = nil
             errorMessage = trf("Preview unavailable: %@", error.localizedDescription)
         }
     }
@@ -606,5 +601,32 @@ private struct ColorDetails: View {
             }
         }
         .font(.caption)
+    }
+}
+
+/// What is under the pointer, kept apart from the panel's state (see `PreviewPanel.pointer`).
+@MainActor
+final class PointerReadout: ObservableObject {
+    @Published var reading: PixelReading?
+}
+
+/// The colour under the pointer: what the photo should look like and what the model predicts in print.
+private struct ReadoutLine: View {
+    @ObservedObject var pointer: PointerReadout
+
+    var body: some View {
+        Group {
+            if let reading = pointer.reading {
+                Text(trf("Original L* %.1f a* %.1f b* %.1f  →  print L* %.1f a* %.1f b* %.1f  ·  ΔE00 %.1f",
+                         reading.intended.l, reading.intended.a, reading.intended.b,
+                         reading.predicted.l, reading.predicted.a, reading.predicted.b, reading.deltaE))
+            } else {
+                Text(tr("Move the pointer over the photo to read the colour of a point."))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
