@@ -127,6 +127,16 @@ enum DeviationBand: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Display colour (sRGB) of the band, shared by the histogram and the ΔE distribution scope.
+    var rgb: (red: Double, green: Double, blue: Double) {
+        switch self {
+        case .belowOne: (0.36, 0.67, 0.42)
+        case .oneToThree: (0.93, 0.78, 0.20)
+        case .threeToSix: (0.95, 0.52, 0.16)
+        case .sixAndAbove: (0.85, 0.22, 0.18)
+        }
+    }
+
     /// The band of a histogram bin, from its lower edge.
     static func band(forLower lower: Double) -> DeviationBand {
         if lower < 1 { return .belowOne }

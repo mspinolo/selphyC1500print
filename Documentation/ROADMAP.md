@@ -157,6 +157,7 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [ ] Open: owner check of the grey theme on a Mac (contrast of secondary text, toolbar, sidebar, dialogs).
 - [x] (0.0.5, owner request) Full-screen view at full resolution on darktable's middle grey, on request only (Shift-Command-F / toolbar / View menu): views 1-4, side by side, fit/100%/zoom/pan, previous/next, thumbnail strip, self-hiding indications; reduced preview first, full resolution in the background (last two photos kept).
 - [ ] Open: owner check on a Mac: speed of the full resolution on large files, memory, behaviour on a second screen and with the main window in macOS full screen.
+- [x] (0.0.6, owner request) ΔE00 distribution scope in Statistics (waveform-like), along image width, height, L* or hue; median/p95 lines; strip marked on the preview for width/height.
 
 ### M6 - Release
 - [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.

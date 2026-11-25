@@ -11,6 +11,11 @@ final class StatisticsModel: ObservableObject {
     @Published private(set) var done = 0
     @Published private(set) var total = 0
     @Published private(set) var isWorking = false
+    @Published private(set) var scope: DeltaEScope?
+
+    /// The analysis maps of the photo in the scope, kept so that changing the axis is immediate.
+    private var scopeMaps: PixelMaps?
+    private var scopeMapsKey: String?
 
     let store: AnalysisStore
 
@@ -70,6 +75,34 @@ final class StatisticsModel: ObservableObject {
         return (url, entry.row)
     }
 
+    /// The ΔE distribution of `photo` along `axis`, for the rendering intent in use.
+    func loadScope(photo: URL?, printerICC: Data, profileDigest: Data, intent: RenderingIntent,
+                   blackPointCompensation: Bool, axis: ScopeAxis) async {
+        guard let photo else {
+            scope = nil
+            return
+        }
+        let key = "\(photo.path)|\(intent.rawValue)|\(blackPointCompensation)|\(profileDigest.base64EncodedString())"
+        var maps = key == scopeMapsKey ? scopeMaps : nil
+        if maps == nil {
+            scope = nil
+            maps = try? await Task.detached(priority: .utility) {
+                try PreviewSession().quickAnalysis(sourceURL: photo, printerICC: printerICC, intent: intent,
+                                                   blackPointCompensation: blackPointCompensation).maps
+            }.value
+            if Task.isCancelled { return }
+            scopeMaps = maps
+            scopeMapsKey = maps == nil ? nil : key
+        }
+        guard let maps else {
+            scope = nil
+            return
+        }
+        let made = await Task.detached(priority: .utility) { DeltaEScope.make(maps: maps, axis: axis) }.value
+        if Task.isCancelled { return }
+        scope = made
+    }
+
     func loadIntents(photo: URL?, printerICC: Data, profileDigest: Data, blackPointCompensation: Bool) async {
         intentResults = []
         guard let photo else { return }
@@ -96,12 +129,21 @@ struct StatisticsView: View {
     @State private var profileDigest: Data?
     @State private var errorMessage: String?
     @State private var sortOrder = [KeyPathComparator(\PhotoAnalysisRow.sortMean, order: .reverse)]
+    @AppStorage("scopeAxis") private var scopeAxis: ScopeAxis = .width
 
     private struct RowsKey: Equatable {
         var photos: [URL]
         var intent: RenderingIntent
         var bpc: Bool
         var profile: Data?
+    }
+
+    private struct ScopeKey: Equatable {
+        var photo: URL?
+        var intent: RenderingIntent
+        var bpc: Bool
+        var profile: Data?
+        var axis: ScopeAxis
     }
 
     private struct IntentsKey: Equatable {
@@ -128,6 +170,7 @@ struct StatisticsView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             detail
+                            scopeSection
                             intents
                             Text(tr("Computed on a reduced copy of each photo, from the printer profile's model: estimates, not print measurements."))
                                 .font(.caption)
@@ -158,6 +201,15 @@ struct StatisticsView: View {
             await model.loadRows(photos: photos, printerICC: printerICC, profileDigest: profileDigest,
                                  intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation)
         }
+        .task(id: ScopeKey(photo: selected, intent: settings.renderingIntent, bpc: settings.blackPointCompensation,
+                           profile: profileDigest, axis: scopeAxis)) {
+            guard let printerICC, let profileDigest else { return }
+            await model.loadScope(photo: selected, printerICC: printerICC, profileDigest: profileDigest,
+                                  intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation,
+                                  axis: scopeAxis)
+        }
+        .onChange(of: scopeAxis) { ScopeHighlight.shared.marker = nil }
+        .onDisappear { ScopeHighlight.shared.marker = nil }
         .task(id: IntentsKey(photo: selected, bpc: settings.blackPointCompensation, profile: profileDigest)) {
             guard let printerICC, let profileDigest else { return }
             await model.loadIntents(photo: selected, printerICC: printerICC, profileDigest: profileDigest,
@@ -294,6 +346,59 @@ struct StatisticsView: View {
             }
         }
         .font(.caption)
+    }
+
+    private var scopeSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Picker(tr("Along"), selection: $scopeAxis) {
+                        ForEach(ScopeAxis.allCases) { axis in
+                            Text(axis.title).tag(axis)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 460)
+                    Spacer()
+                }
+                if let scope = model.scope, scope.axis == scopeAxis {
+                    DeltaEScopeView(scope: scope) { fraction in markPreview(scope: scope, fraction: fraction) }
+                } else {
+                    Text(tr("Computing…")).foregroundStyle(.secondary).frame(height: 200)
+                }
+                Text(scopeExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Text(tr("ΔE00 distribution (selected photo)"))
+        }
+    }
+
+    private var scopeExplanation: String {
+        switch scopeAxis {
+        case .width, .height:
+            tr("Each vertical line is the ΔE00 distribution of one strip of the photo, brighter where more pixels are. Move the pointer over the plot to mark the strip on the preview in the main window.")
+        case .lightness:
+            tr("Each vertical line is the ΔE00 distribution of the pixels of one lightness: it shows which tones (shadows, midtones, highlights) the print reproduces worst.")
+        case .hue:
+            tr("Each vertical line is the ΔE00 distribution of the pixels of one hue: it shows which colours the print reproduces worst.")
+        }
+    }
+
+    /// For the width and height axes, marks the strip under the pointer on the main window's preview.
+    private func markPreview(scope: DeltaEScope, fraction: Double?) {
+        guard let fraction, let photo = selected, scope.axis == .width || scope.axis == .height else {
+            ScopeHighlight.shared.marker = nil
+            return
+        }
+        let column = scope.column(at: fraction)
+        let span = 1 / Double(scope.columns)
+        ScopeHighlight.shared.marker = ScopeHighlight.Marker(
+            photo: photo, vertical: scope.axis == .width, start: Double(column) * span, span: span)
     }
 
     @ViewBuilder
@@ -433,12 +538,5 @@ struct StatisticsView: View {
 }
 
 extension DeviationBand {
-    var color: Color {
-        switch self {
-        case .belowOne: Color(red: 0.36, green: 0.67, blue: 0.42)
-        case .oneToThree: Color(red: 0.93, green: 0.78, blue: 0.20)
-        case .threeToSix: Color(red: 0.95, green: 0.52, blue: 0.16)
-        case .sixAndAbove: Color(red: 0.85, green: 0.22, blue: 0.18)
-        }
-    }
+    var color: Color { Color(.sRGB, red: rgb.red, green: rgb.green, blue: rgb.blue, opacity: 1) }
 }

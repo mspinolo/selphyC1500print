@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-struct Lab3: Equatable {
+struct Lab3: Equatable, Sendable {
     var l: Float
     var a: Float
     var b: Float
@@ -12,7 +12,7 @@ struct Lab3: Equatable {
 /// Per-pixel results of the model, at the analysis resolution (a reduced copy of the oriented
 /// photo): the intended appearance (the photo read as sRGB), the appearance predicted for the
 /// corrected values, and the dE00 between them. Every overlay and statistic comes from these.
-struct PixelMaps {
+struct PixelMaps: Sendable {
     let width: Int
     let height: Int
     let deltaE: [Float]

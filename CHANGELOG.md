@@ -3,6 +3,18 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.6] - 2026-11-25
+Sixth pre-release. Not verified on physical prints.
+
+### Added
+- Statistics: "ΔE00 distribution" scope for the selected photo, like a waveform. Each vertical
+  line is the distribution of the predicted ΔE00 of the pixels in one strip, brighter where
+  there are more pixels (log scale), coloured by ΔE00 band, with median and 95th-percentile
+  lines and guides at 1, 3 and 6. The horizontal axis can be the image width, the image height,
+  the lightness L* (which tones print worst) or the hue (which colours; pixels without a
+  definite hue are left out). With width or height, the strip under the pointer is marked on
+  the preview in the main window.
+
 ## [0.0.5] - 2026-11-25
 Fifth pre-release. Not verified on physical prints.
 

@@ -279,7 +279,14 @@ struct PreviewPanel: View {
                         factor: zoom.factor,
                         onHover: { point in updateReading(point, preview: preview) }
                     ) {
-                        imageContent(for: preview)
+                        ZStack {
+                            imageContent(for: preview)
+                            // The strip under the pointer in the Statistics window's ΔE distribution.
+                            ScopeMarkerOverlay(
+                                photo: photo,
+                                aspect: CGFloat(preview.original.width) / CGFloat(max(1, preview.original.height))
+                            )
+                        }
                     }
                 }
             } else if let errorMessage {
