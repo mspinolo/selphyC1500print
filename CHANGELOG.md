@@ -22,6 +22,7 @@ Third pre-release. Not verified on physical prints.
 
 ### Changed
 - CI: actions/checkout and actions/setup-python updated to v7 (Node 24).
+- CI: actions/upload-artifact v7, actions/download-artifact v8 and softprops/action-gh-release v3 (Node 24; removes the Node 20 deprecation warning). Note: the release job with these versions is first exercised by the next release.
 
 ## [0.0.2] - 2026-11-24
 Second pre-release. Not verified on physical prints.

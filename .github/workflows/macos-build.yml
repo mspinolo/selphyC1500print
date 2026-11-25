@@ -68,7 +68,7 @@ jobs:
           body=$( { tail -25 "$RUNNER_TEMP/snap.log"; ls -la "$RUNNER_TEMP/snapshots"; } | cut -c1-240 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
           echo "::notice title=window snapshots::${body}"
       - name: Upload window snapshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: window-snapshots
           path: ${{ runner.temp }}/snapshots
@@ -88,7 +88,7 @@ jobs:
           (cd "$RUNNER_TEMP" && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
           echo "ZIP_NAME=$(basename "$zip")" >> "$GITHUB_ENV"
       - name: Upload app bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: SELPHY-CP1500-Print-app
           path: |
@@ -115,7 +115,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
       - name: Download app bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: SELPHY-CP1500-Print-app
           path: dist
@@ -127,7 +127,7 @@ jobs:
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "::error::no changelog entry for $version"; exit 1; }
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
