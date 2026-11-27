@@ -335,16 +335,16 @@ struct StatisticsView: View {
             )
             .chartXScale(domain: 0...upper)
             .chartXAxis {
-                AxisMarks(values: [0, 1, 2, 3, 4, 6, 8, 10, 12]) { _ in
+                AxisMarks(position: .bottom, values: [0, 1, 2, 3, 4, 6, 8, 10, 12]) { _ in
                     AxisGridLine()
                     AxisTick()
-                    AxisValueLabel()
+                    AxisValueLabel(anchor: .top)
                 }
             }
             .chartYAxis {
                 AxisMarks(position: .leading) { _ in
                     AxisGridLine()
-                    AxisValueLabel()
+                    AxisValueLabel(anchor: .trailing)
                 }
             }
             .chartLegend(position: .bottom, alignment: .leading)
