@@ -54,6 +54,10 @@ The following cases should be added or manually exercised as the implementation 
 | Output | Re-open generated JPEG | Decodable RGB JPEG with embedded sRGB profile |
 | Temporary files | Conversion failure | Partial output folder removed |
 | Temporary files | Old abandoned session | Removed only on next conversion, according to retention policy |
+| Bit depth | 16-bit source with steps finer than one 8-bit level | Precision kept until the final rounding; monotonic output (`InputMatrixTests`) |
+| Encoding | Linear (gamma 1.0) 16-bit TIFF | Same print as the gamma-encoded file of the same colours, within 1 level (`InputMatrixTests`) |
+| Source profile | Display P3 | P3 numbers of an sRGB colour print as that colour; P3 primaries differ from sRGB ones (`InputMatrixTests`); preview Original keeps the wide gamut |
+| Size | 6000 x 4000 JPEG | Exported at full size; time reported in CI (`InputMatrixTests`, `FullScreenTests`) |
 
 The current integration test is a first end-to-end smoke test, not yet the complete matrix above. In particular, the test must eventually cover embedded Adobe RGB, missing-profile fallback, EXIF orientation, grayscale/CMYK rejection, multiple inputs, and atomic cleanup.
 

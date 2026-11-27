@@ -52,8 +52,9 @@ struct ValidationAssistantView: View {
     @State private var colorCheckerThumbnail: CGImage?
     @State private var confirmingReset = false
 
-    init(settings: AppSettings) {
-        _model = StateObject(wrappedValue: ValidationModel(settings: settings))
+    init(settings: AppSettings, storeURL: URL? = ValidationModel.defaultStoreURL, initialStep: ValidationStep = .intro) {
+        _model = StateObject(wrappedValue: ValidationModel(settings: settings, storeURL: storeURL))
+        _step = State(initialValue: initialStep)
     }
 
     private var steps: [ValidationStep] { ValidationStep.allCases.filter { $0.isVisible(in: model.data.mode) } }

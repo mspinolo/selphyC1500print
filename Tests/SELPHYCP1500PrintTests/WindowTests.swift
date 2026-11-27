@@ -216,7 +216,15 @@ final class WindowTests: XCTestCase {
             try snapshot(scopes, size: CGSize(width: 900, height: 1260), name: "15-scope-en", wait: 1, to: out)
         }
 
+        // The print validation assistant: introduction and choice of the ColorChecker edition.
+        let store = out.appendingPathComponent("validation-session.json")
+        try snapshot(ValidationAssistantView(settings: settings, storeURL: store, initialStep: .intro).environmentObject(settings),
+                     size: CGSize(width: 1040, height: 760), name: "16-validation-intro-en", wait: 1, to: out)
+        try snapshot(ValidationAssistantView(settings: settings, storeURL: store, initialStep: .reference).environmentObject(settings),
+                     size: CGSize(width: 1040, height: 900), name: "17-validation-reference-en", wait: 1, to: out)
+        try? FileManager.default.removeItem(at: store)
+
         let written = try FileManager.default.contentsOfDirectory(atPath: out.path).filter { $0.hasSuffix(".png") }
-        XCTAssertGreaterThanOrEqual(written.count, 14)
+        XCTAssertGreaterThanOrEqual(written.count, 16)
     }
 }

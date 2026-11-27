@@ -9,6 +9,10 @@ spectrophotometer. It resolves differences between variants well (same scan chai
 them); absolute dE values carry the scanner uncertainty measured in step 2. Photographs are also
 judged by eye. This extends section 4 of `VALIDATION_PLAN.md`.
 
+The app has a guided version of this procedure: **Advanced > Print validation assistant** (see
+`USER_GUIDE.md`). It produces the same files, measurements and report as the Python tools below,
+which remain the reference implementation.
+
 ## What the tools measure
 - **Digital chart** (`validation/charts/selphy_chart_v1.png`): 24 ColorChecker colours as sRGB
   numbers, a grey ramp, near-black steps, primaries and secondaries (100 % and 50 %), skin tones,
@@ -42,12 +46,14 @@ question on neutral rendering.
    (macOS: `brew install cmake`). Without cmake:
    `cc -O2 -shared -fPIC -DHasTHREADS=1 -DHAVE_GMTIME_R=1 -ISources/SELPHYColorCore/include -ISources/CLittleCMS/include -ISources/CLittleCMS/src Sources/SELPHYColorCore/selphy_color_core.c Sources/CLittleCMS/src/*.c -lm -o build/libselphy_core_shared.dylib` (after `mkdir -p build`)
    (tested on Linux only). Check the tools: `python3 -m unittest discover -s validation/tests`.
-2. **Scanner chain check.** Scan the ColorChecker Classic with exactly the settings you will use
-   for the prints. Get the reference Lab (D50) of *your* chart (**open item: the owner is finding the chart's version/year**) (datasheet, X-Rite software or
-   BabelColor; values differ before/after 2014): fill `validation/colorchecker_reference_template.csv`.
+2. **Scanner chain check.** Scan the ColorChecker with exactly the settings you will use
+   for the prints. The reference Lab (D50) of the chart depends on its edition: the published
+   values are in `validation/references/` (Classic before November 2014 — the default, the owner's
+   chart —, from November 2014, 2005, 1976, BabelColor average; SG before / from November 2014).
    Read, in any image viewer, the pixel coordinates of the centres of dark skin (top-left),
    bluish green (top-right), white (bottom-left), black (bottom-right), chart upright, then:
-   `python3 validation/check_scanner.py cc.tif --corners "x,y x,y x,y x,y" --reference my_reference.csv --out results`
+   `python3 validation/check_scanner.py cc.tif --corners "x,y x,y x,y x,y" --out results`
+   (add `--reference validation/references/<edition>.csv` for another edition, or your own file).
    Mean dE00 of a few units is normal for a flatbed; above about 5, suspect that the profile is applied twice
    or not at all (see scanning).
 3. **Native raster.** Confirm the printer's native pixel size for the 100 x 148 mm print and, if

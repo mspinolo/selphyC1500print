@@ -30,15 +30,15 @@ every release's notes.
 ## Checklist for 1.0.0 (proposed; the owner confirms or edits it)
 - [ ] The owner has run the app on a real Mac: file pickers and bookmarks in the sandbox,
       remembered save folder after a restart, preview on the real display, performance.
-- [ ] Remaining M2 validation-matrix gaps closed (real 16-bit/linear inputs, very large image
-      timing, Display P3 source).
+- [x] Remaining M2 validation-matrix gaps closed (16-bit/linear inputs, very large image
+      timing, Display P3 source) with synthetic fixtures, 0.0.7.
 - [ ] M4: a print route works on a real CP1500 with the vendor's settings
       (`Documentation/PRINT_SETTINGS.md`).
-- [ ] ColorChecker version known and its reference values used in the scanner check (owner to provide the version).
+- [x] ColorChecker version known (Classic, before November 2014) and its reference values used in the scanner check.
 - [ ] Printer-side "Image Optimize" confirmed off for the print route used by the app (it is a printer-menu setting that resets at power-off) and checked on a physical print.
 - [ ] Track P: at least a first physical print comparison, or the "experimental, model-based"
       notice is kept in the app and README and 1.0.0 is explicitly declared without it.
-- [ ] README/user documentation with limitations; app icon.
+- [x] README/user documentation with limitations (`Documentation/USER_GUIDE.md`); app icon.
 
 ## Not present
 - Notarisation and Developer ID signing; app icon.

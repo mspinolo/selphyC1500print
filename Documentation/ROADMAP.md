@@ -64,7 +64,7 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 - [x] Memory bounds: 100 MP cap checked before any allocation (unit-tested); the 16-bit working buffer is released after conversion.
 - [x] Per-pixel packing loops replaced: rows are converted in blocks, in parallel (the transform is lock-free: no cache, no shared scratch), with unaligned 16-bit loads.
 - [x] CI records the macOS / Xcode / Swift versions.
-- [ ] Remaining validation-matrix gaps (see `VALIDATION_PLAN.md`): 16-bit and linear inputs (the unused ProPhoto 32-bit TIFF fixture needs a licence check before use), very large images (timing), Display P3 source.
+- [x] Validation-matrix gaps closed in 0.0.7 with synthetic fixtures (`InputMatrixTests`): 16-bit precision, linear 16-bit input, Display P3 source, 24-megapixel export timing. (The unused ProPhoto 32-bit TIFF fixture is left aside: owner decision, 2026-11-27.)
 
 **Exit:** the validation matrix in `VALIDATION_PLAN.md` is fully automated and green.
 
@@ -78,7 +78,8 @@ Order of work: M3.1 preview first (it is also the tool to judge the correction w
 - [x] Display profile: taken from the screen's ColorSync profile, sRGB fallback if unusable.
 - [x] UI wording: simulation from the printer profile, not a print proof, not validated with physical prints; out-of-gamut share shown when above 0.5%.
 - [ ] Owner check on a real Mac (not verifiable in CI): the panel layout and the slider, the display profile of a wide-gamut screen (P3), responsiveness on a large photo.
-- [ ] Known limits: the preview normalises the original to sRGB (a wide-gamut source is shown clipped to sRGB in the "Original" view); gamut-clipping count is best effort for display profiles that clip in float.
+- [x] The preview's Original view now shows the file in its own colour space (0.0.7): a wide-gamut source is no longer clipped to sRGB.
+- [ ] Known limit: the gamut-clipping count is best effort for display profiles that clip in float.
 
 **M3.1b Colour details and per-photo checks - implemented, to be checked on the owner's Mac**
 Measured on the real profile, corrected neutral ramp (model, predicted print vs intended appearance):
@@ -95,7 +96,7 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [x] Measured relative + BPC vs perceptual vs relative on shadows (table above).
 - [ ] Decide what the UI recommends for black-and-white photos (needs a print to judge shadow detail against neutrality; for now the panel only reports residual tint and the share of shadows below the darkest tone).
 - [x] Preview speed: `PreviewSession` keeps the stages in memory (decoded and corrected buffers, checks and dE map per photo/intent/BPC/profile, the printer-to-display transform, the two renderings; LRU 3/6/8 entries; invalidated by the file's modification date read from the file system - a test caught that `URL` caches it). The checks and the dE map run on a copy reduced to 512 px, the out-of-gamut share on the same sample. CI runner, 3000x2000 source: 6.0 s before, now 1.9 s cold, 0.8 s when only a display option changes, 5 ms for an identical request. Counters in the tests assert that nothing is recomputed that should not be.
-- [ ] Later, lower priority: a*-b* plot of the printer gamut versus sRGB with the photo's colours.
+- [x] a*-b* plot of the printer gamut versus sRGB with the photo's colours (Statistics window, 0.0.7).
 
 **M3.2 Application shell**
 - [x] `.app` bundle: `scripts/make-app.sh`, `Packaging/` (Info.plist, sandbox entitlements incl. bookmarks.app-scope), ad-hoc signed in CI, signature/plist/entitlements verified, zip uploaded as artifact. No notarisation (owner decision, no Developer ID; see `Documentation/RELEASE.md`); app icon still missing. Sandbox behaviour must be checked on a real Mac.
@@ -111,12 +112,13 @@ Correction of an earlier statement: the darkest the printer can print is L* 13.2
 - [x] (4a) Ship behind an "experimental, vendor-trusted colour model" notice: shown before printing (Image Optimize off, Postcard, no scaling), can be silenced; `com.apple.security.print` entitlement added. Open: `Documentation/PRINT_SETTINGS.md` (owner to supply vendor instructions); 4b below.
 - [ ] Route-equivalence check on the first print day (Track P): the same corrected chart printed through the app and through Preview/Canon's app must give indistinguishable sheets, otherwise the route alters colour.
 
-### M3.3 - Guided validation assistant (decided: for all users; deferred, to be built after M4 and the first real session)
-- [ ] Wizard in the app built on `Documentation/PHYSICAL_VALIDATION.md`: what to print and how, ordered file export with blind codes, guided loading of the scans, analysis and report with the gates. Built *after* the first real session so that the procedure is frozen by experience; the Python tools in `validation/` are the reference implementation the app's analysis is cross-checked against (same synthetic scans, same numbers). The analysis goes into the portable C core so it is tested on Linux too.
-- [ ] **Audience: all users** (owner decision, 2026-11-24), under an "Advanced" area, with a reduced scanner-less mode (visual side-by-side comparison of original/corrected prints).
-- [ ] **Selectable reference chart and version** (owner decision): the user picks which colour target they own (ColorChecker Classic 24, and further models such as Passport/Mini/SG or an IT8 as they are added) and which edition/production year; reference values live in data files, one per target/edition, plus import of the user's own values (CSV / CGATS). Bundle reference values only if their licence allows it; otherwise the user supplies them. The wizard must state which reference was used in every report.
-- [ ] Scanner side: accept the user's own scanner profile (embedded or separate) and explain the "profile applied twice or not at all" trap; the chain-error check on the target gates how far the results are trusted.
-- [ ] Depends on: the ColorChecker reference version (owner), the M4 print route.
+### M3.3 - Guided validation assistant (built in 0.0.7, before the first real session at the owner's request, 2026-11-27)
+- [x] Wizard in the app (menu Advanced > Print validation assistant) built on `Documentation/PHYSICAL_VALIDATION.md`: mode, reference chart, files to print with blind codes in random order (print order + separate key), print checklist and session record, scanner check, chart scans (folder matching by code), photographs (blind visual verdict by code), report with the gates and export. The session is saved (Application Support) so printing and scanning can happen on different days.
+- [x] The analysis algorithms (corner marks, homography, patch sampling) are in the portable C core (`selphy_chart.c`) and cross-checked on Linux against `validation/analyze_scan.py` on synthetic scans (same marks within 1e-6 px, samples within one 16-bit step); summaries, gates and report text follow `analyze_scan.py` / `report.py` (numpy percentiles, rounding), and exported results use the Python tools' format.
+- [x] **Audience: all users**, under the Advanced menu, with a scanner-less mode (visual side-by-side comparison of original/corrected prints).
+- [x] **Selectable reference chart and edition**: ColorChecker Classic before November 2014 (**default, the owner's chart**), from November 2014, 2005 data, 1976 original (Bradford-adapted to D50), BabelColor average; ColorChecker SG before / from November 2014; import of the user's own values (CSV / CGATS LAB or XYZ). Values from X-Rite / BabelColor via colour-science (BSD), provenance in `validation/references/`; the report states the reference used.
+- [x] Scanner side: own scanner profile (embedded or separate); the check compares with the other available profile and warns when the profile looks applied twice or not at all; its mean error sets how small a difference the report interprets.
+- [ ] Owner check on a Mac, then on print day: the whole flow with real prints and scans; adjust the procedure from experience.
 
 ### M5 - Window redesign and app icon (after M4)
 Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattractive, unprofessional and badly sized.
@@ -160,11 +162,13 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [x] (0.0.6, owner request) ΔE00 distribution scope in Statistics (waveform-like), along image width, height, L* or hue; median/p95 lines; strip marked on the preview for width/height.
 
 ### M6 - Release
-- [ ] User documentation with limitations, release checklist, versioned releases. Keep the "experimental" label until track P has produced evidence.
+- [x] User documentation with limitations: `Documentation/USER_GUIDE.md` (0.0.7); release checklist and versioned releases exist.
+- [ ] Keep the "experimental" label until track P has produced evidence.
 
 ## Track P - Physical validation (optional, owner-scheduled)
 - [ ] **To check at the first physical print:** whether the printer's **Image Optimize** (printer menu, On by default, resets at power-off) really is off and whether it affects AirPrint jobs from the Mac at all (V3 vs V1). Owner's earlier note: it is the only setting that can be changed. If it has no effect on this route, find out (optional SD-card/USB-stick sheet) whether AirPrint jobs are optimised; the corrected file must not be converted or enhanced a second time.
-- [ ] **Owner to do:** find the version/production year of the ColorChecker Classic (it decides the reference Lab values) and pass it on; then the matching reference file goes into `validation/` and `check_scanner.py` can be run. Also needed before print day: how VueScan outputs the scan (profile applied or not), and the printer's native raster.
+- [x] ColorChecker Classic made before 2014 (owner, 2026-11-27): the before-November-2014 values are the default in the app and in `check_scanner.py`.
+- [ ] **Owner to do before print day:** how VueScan outputs the scan (profile applied or not), and the printer's native raster.
 
 Not blocking. Procedure and tools: `Documentation/PHYSICAL_VALIDATION.md` (`validation/`: chart generator, scan analysis, scanner check, report, self-tested with synthetic scans). First session planned for the owner's physical prints (13 sheets, ColorChecker-checked scanner chain, no repeats). Original sketch: matched uncorrected/corrected chart set (ramps, shadow steps, skin tones, primaries, gradient, one photograph) at the printer's native raster, 3 repeats, same paper pack and settings, randomised order, neutral light, measured patches if an instrument is available; results in `Documentation/validation/`. Use it to confirm or revise the default intent/BPC and the print-path identity assumption.
 

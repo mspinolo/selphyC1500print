@@ -3,6 +3,38 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.7] - 2026-11-27
+Seventh pre-release. Not verified on physical prints.
+
+### Added
+- **Print validation assistant** (menu Advanced): the physical test of
+  `Documentation/PHYSICAL_VALIDATION.md` step by step, with or without a scanner. Test chart
+  generated in the app (identical to `validation/charts/selphy_chart_v1.png`), files to print
+  named by blind codes in random order with a separate key, print checklist and session record,
+  scanner check on a clicked ColorChecker, automatic analysis of the chart scans (corner marks
+  found in any orientation), blind visual verdicts on the photographs, report with the gates
+  G1-G4 and the model's prediction, export compatible with the Python tools. The session is saved
+  between launches.
+- ColorChecker reference editions: Classic before November 2014 (default), from November 2014,
+  2005, 1976, BabelColor average; SG before / from November 2014; import of your own values
+  (CSV, CGATS / IT8 with LAB or XYZ). Also used by `validation/check_scanner.py`.
+- Chart-scan analysis in the portable C core (`selphy_chart.c`), cross-checked against the Python
+  reference on synthetic scans in CI.
+- Statistics: a*-b* plot of the printer's gamut against sRGB with the photo's colours.
+- Settings: drag an `.icc` file onto the profile row.
+- `Documentation/USER_GUIDE.md`; README brought up to date.
+
+### Changed
+- Full-screen view: the view on screen is computed first at full resolution, then the others; the
+  Original needs no correction and comes straight from the file.
+- The preview's Original view shows the photo in its own colour space (wide-gamut files are no
+  longer clipped to sRGB).
+- Statistics histogram rebuilt (explicit bars and axes) to avoid the two Charts log warnings.
+
+### Tests
+- Input matrix: 16-bit precision, linear 16-bit input, Display P3 sources, 24-megapixel export
+  timing.
+
 ## [0.0.6] - 2026-11-25
 Sixth pre-release. Not verified on physical prints.
 
