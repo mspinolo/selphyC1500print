@@ -18,7 +18,7 @@ ordinary sRGB-tagged files that you print as usual.
    drag the file onto the profile row. The app remembers it. The report under the name tells you
    whether it looks like a printer profile with the tables the correction needs.
 
-Requirements: macOS 14 or later. The printer is added in System Settings > Printers & Scanners;
+Requirements: macOS 27.0 or later (27.2 recommended; it will become the minimum in a later version). The printer is added in System Settings > Printers & Scanners;
 it prints through AirPrint (USB or Wi-Fi), without a Canon driver.
 
 ## 2. The main window

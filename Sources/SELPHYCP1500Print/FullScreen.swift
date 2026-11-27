@@ -324,9 +324,12 @@ final class FullScreenModel: ObservableObject {
             return
         }
         let display = PreviewService.Display.current(for: screen ?? NSScreen.main)
-        var options = PreviewService.Options(intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation)
-        options.simulatePaperWhite = settings.simulatePaperWhite
-        options.previewBlackPointCompensation = settings.previewMonitorBlack
+        let options: PreviewService.Options = {
+            var options = PreviewService.Options(intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation)
+            options.simulatePaperWhite = settings.simulatePaperWhite
+            options.previewBlackPointCompensation = settings.previewMonitorBlack
+            return options
+        }()
         let fullSession = fullSession
         let loadID = UUID()
         currentLoad = loadID

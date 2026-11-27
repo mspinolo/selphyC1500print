@@ -21,6 +21,9 @@ Eighth pre-release. Not verified on physical prints.
 - The 24-hour clean-up removes only the app's own session folders (UUID-named) in its subfolder,
   nothing else.
 - README brought up to date (printing, files and privacy, language setting, test suites).
+- **Requires macOS 27.0 or later** (was 14). Built with Xcode 27.2 and Swift 6.4 in the Swift 6
+  language mode (data races checked at compile time); deprecated APIs replaced. The minimum will
+  move to macOS 27.2 once the CI runner can test on it.
 - "Generate test copies" is now **Generate corrected copies**, with a tooltip saying what it does
   and how many photos it converts; when it is disabled, the reason (no profile, no photos) is shown
   next to it.

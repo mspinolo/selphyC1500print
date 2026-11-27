@@ -65,8 +65,9 @@ enum ColorCorrectionService {
     }
 
     /// Owns a `selphy_transform`. Immutable after creation, so it can be shared across
-    /// the images of one batch that use the same source profile.
-    final class ColorTransform {
+    /// the images of one batch that use the same source profile, and across threads: LittleCMS
+    /// (built with HasTHREADS) keeps no per-call state in a transform, which is why `@unchecked`.
+    final class ColorTransform: @unchecked Sendable {
         private let handle: OpaquePointer
         let effectiveBlackPointCompensation: Bool
 
@@ -468,9 +469,12 @@ enum ColorCorrectionService {
         var output = Data(count: width * height * 4)
         sourcePixels.withUnsafeBytes { sourceRaw in
             output.withUnsafeMutableBytes { outputRaw in
-                guard let sourceBase = sourceRaw.baseAddress,
+                guard let sourceStart = sourceRaw.baseAddress,
                       let outputBase = outputRaw.baseAddress else { return }
-                let destination = outputBase.assumingMemoryBound(to: UInt8.self)
+                // Each block reads its own rows and writes its own pixels: no overlap between
+                // the concurrent iterations, and the buffers outlive concurrentPerform.
+                nonisolated(unsafe) let sourceBase = sourceStart
+                nonisolated(unsafe) let destination = outputBase.assumingMemoryBound(to: UInt8.self)
                 DispatchQueue.concurrentPerform(iterations: blockCount) { block in
                     let firstRow = block * rowsPerBlock
                     let rows = min(rowsPerBlock, height - firstRow)

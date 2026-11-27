@@ -36,7 +36,7 @@ Interpretation (engineering inference, not print-validated): the BPC toggle in t
 
 ### M0 - Honest baseline (small, first)
 - [x] Fix README, VALIDATION_PLAN, `.gitignore`: describe the committed profile truthfully; CI uses the repo copy (download step removed).
-- [x] No Homebrew dependency any more (LittleCMS vendored). [ ] Record the macOS / Xcode / Swift versions used by CI in this file.
+- [x] No Homebrew dependency any more (LittleCMS vendored). [x] CI toolchain recorded (2026-11-27): runner macOS 27.0.1, Xcode 27.2 (27B52), Swift 6.4.2, macOS 27.2 SDK.
 - [x] Known ColorSync/LittleCMS divergences recorded as strict expected failures (thresholds unchanged, still reported, test fails if they start passing); CI publishes test numbers as annotations. Replaced by the DeltaE metric in M1.
 - [ ] Remove or clearly label unused assets (the 6 MB third-party TIFF is referenced by no test; confirm its licence).
 
@@ -160,6 +160,10 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [x] (0.0.5, owner request) Full-screen view at full resolution on darktable's middle grey, on request only (Shift-Command-F / toolbar / View menu): views 1-4, side by side, fit/100%/zoom/pan, previous/next, thumbnail strip, self-hiding indications; reduced preview first, full resolution in the background (last two photos kept).
 - [ ] Open: owner check on a Mac: speed of the full resolution on large files, memory, behaviour on a second screen and with the main window in macOS full screen.
 - [x] (0.0.6, owner request) ΔE00 distribution scope in Statistics (waveform-like), along image width, height, L* or hue; median/p95 lines; strip marked on the preview for width/height.
+
+### M5d - Toolchain modernisation (owner request, 2026-11-27)
+- [x] Swift tools 6.4, newest Xcode selected in CI (27.2), Swift 6 language mode (complete concurrency checking), deprecated APIs replaced; minimum macOS 14 -> 27.0.
+- [ ] Raise the minimum to macOS 27.2 (`Package.swift`, `Packaging/Info.plist`, README, user guide) once the CI runner image runs 27.2: a binary built for 27.2 does not run on the 27.0.1 runner, so the macOS tests would stop running.
 
 ### M6 - Release
 - [x] User documentation with limitations: `Documentation/USER_GUIDE.md` (0.0.7); release checklist and versioned releases exist.

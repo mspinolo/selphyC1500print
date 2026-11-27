@@ -43,12 +43,20 @@ These checks establish that the software does what the colour model says. They d
 
 ## Build
 
-Requires macOS 14 or later and Xcode/Swift 5.9 or later. No Homebrew packages are needed: LittleCMS is vendored in `Sources/CLittleCMS`.
+Requirements:
+
+- **macOS 27.0 or later** to run the app. The target minimum is macOS 27.2; it will be raised as soon as the GitHub macOS runner image runs 27.2, so that the macOS tests can still run in CI (the workflow posts a notice when that happens).
+- **Xcode 27.2** (Swift 6.4 toolchain, macOS 27.2 SDK) to build. The package uses `swift-tools-version: 6.4` and the **Swift 6 language mode**, so data races are checked at compile time.
+- No Homebrew packages: LittleCMS is vendored in `Sources/CLittleCMS`.
 
 ```sh
 swift build
 swift run
+swift test              # macOS suite
+scripts/make-app.sh     # sandboxed, ad-hoc signed .app (see Documentation/RELEASE.md)
 ```
+
+The portable colour core also builds and tests on Linux with CMake (see Tests above).
 
 ## Next steps
 
