@@ -44,11 +44,23 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          newest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
+          if [ -n "$newest" ]; then sudo xcode-select -s "$newest/Contents/Developer"; fi
       - name: Show toolchain and OS versions
         run: |
           sw_vers
           xcodebuild -version || true
           swift --version
+          os=$(sw_vers -productVersion)
+          # The owner's target is macOS 27.2; the minimum stays 27.0 until the runner can run it.
+          if [ "$(printf '%s\n' "27.2" "$os" | sort -V | head -1)" = "27.2" ]; then
+            echo "::notice title=macOS 27.2 available::The runner is on macOS $os: the minimum can now be raised to 27.2 (Package.swift, Info.plist)."
+          else
+            echo "::notice title=macOS minimum::Runner on macOS $os, $(xcodebuild -version | head -1): the minimum stays 27.0 until the runner reaches 27.2."
+          fi
       - name: Build package
         run: swift build -v
       - name: Run automated tests
