@@ -278,7 +278,7 @@ final class FullScreenModel: ObservableObject {
         load()
         hudTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                try? await Task.sleep(for: .milliseconds(500))
                 self?.hideIdleHUD()
             }
         }
@@ -341,7 +341,7 @@ final class FullScreenModel: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             if let quick { self.preview = quick }
             // A short pause: browsing quickly does not start a full-resolution computation per photo.
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             let order = self.layerOrder()
             let cancelled = CancellationFlag()

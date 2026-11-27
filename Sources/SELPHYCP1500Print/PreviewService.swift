@@ -87,8 +87,9 @@ enum PreviewService {
         }
     }
 
-    /// Owns a `selphy_preview`. Immutable after creation; safe to use from several threads.
-    final class PreviewTransform {
+    /// Owns a `selphy_preview`. Immutable after creation; safe to use from several threads
+    /// (LittleCMS built with HasTHREADS keeps no per-call state in a transform), hence `@unchecked`.
+    final class PreviewTransform: @unchecked Sendable {
         private let handle: OpaquePointer
 
         init(printerICC: Data, displayICC: Data?, simulatePaperWhite: Bool, blackPointCompensation: Bool) throws {
@@ -148,9 +149,14 @@ enum PreviewService {
             device.withUnsafeBytes { deviceRaw in
                 output.withUnsafeMutableBytes { outputRaw in
                     blockClipped.withUnsafeMutableBufferPointer { clippedBuffer in
-                        guard let deviceBase = deviceRaw.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                              let outputBase = outputRaw.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                              let clippedBase = clippedBuffer.baseAddress else { return }
+                        guard let deviceStart = deviceRaw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                              let outputStart = outputRaw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                              let clippedStart = clippedBuffer.baseAddress else { return }
+                        // Each block touches only its own pixels and its own counter, and the
+                        // buffers outlive concurrentPerform.
+                        nonisolated(unsafe) let deviceBase = deviceStart
+                        nonisolated(unsafe) let outputBase = outputStart
+                        nonisolated(unsafe) let clippedBase = clippedStart
                         DispatchQueue.concurrentPerform(iterations: blockCount) { block in
                             let firstPixel = block * rowsPerBlock * width
                             let count = min(rowsPerBlock * width, pixelCount - firstPixel)
