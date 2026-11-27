@@ -115,7 +115,9 @@ never both. Let prints rest 24 hours before scanning.
 ## 7. Settings
 
 Profile, rendering intent and black point compensation (BPC is always on for Perceptual with a v4
-profile, as the ICC specification requires), language (English / Italiano), interface theme
+profile, as the ICC specification requires), the folder for the temporary copies (the system one by
+default; a chosen folder gets a subfolder "SELPHY CP1500 Print temporary", and only the app's own
+sessions older than 24 hours are ever removed from it), language (English / Italiano), interface theme
 (follow the system, light, dark, or **neutral grey** — darktable's grey, recommended when judging
 colours) and the reminder shown before printing.
 

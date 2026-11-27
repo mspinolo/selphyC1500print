@@ -420,5 +420,14 @@ enum ItalianStrings {
         "Converts the %d photos in the list with the printer profile into corrected copies to print or save. The originals are not changed.": "Converte le %d foto dell'elenco con il profilo della stampante in copie corrette da stampare o salvare. Gli originali non vengono modificati.",
         "The corrected copies could not be generated": "Non è stato possibile generare le copie corrette",
         "OK": "OK",
+        "Choose folder…": "Scegli cartella…",
+        "System temporary folder": "Cartella temporanea di sistema",
+        "Temporary copies": "Copie temporanee",
+        "The chosen temporary folder (%@) cannot be reached: the system temporary folder was used.": "La cartella temporanea scelta (%@) non è raggiungibile: è stata usata quella di sistema.",
+        "The chosen temporary folder cannot be reached: %@": "La cartella temporanea scelta non è raggiungibile: %@",
+        "The corrected copies are written to a subfolder named “%@”; sessions older than 24 hours are removed when new copies are made. Nothing else in the folder is touched.": "Le copie corrette vengono scritte in una sottocartella chiamata “%@”; le sessioni più vecchie di 24 ore vengono rimosse quando si generano nuove copie. Nient'altro nella cartella viene toccato.",
+        "The folder cannot be used: %@": "La cartella non può essere usata: %@",
+        "These copies are temporary (in %@) and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted.": "Queste copie sono temporanee (in %@) e vengono rimosse dopo 24 ore. Per conservarle salvale in una cartella: i file esistenti non vengono mai sovrascritti né cancellati.",
+        "Use the system folder": "Usa la cartella di sistema",
     ]
 }

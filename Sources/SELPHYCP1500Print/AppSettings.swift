@@ -122,6 +122,19 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(saveFolderDisplayName, forKey: Keys.saveFolderDisplayName) }
     }
 
+    /// Folder for the temporary corrected copies (nil = the system temporary folder).
+    @Published private(set) var temporaryFolderBookmark: Data? {
+        didSet { defaults.set(temporaryFolderBookmark, forKey: Keys.temporaryFolderBookmark) }
+    }
+
+    @Published private(set) var temporaryFolderDisplayName: String {
+        didSet { defaults.set(temporaryFolderDisplayName, forKey: Keys.temporaryFolderDisplayName) }
+    }
+
+    /// The chosen temporary folder with its security-scoped access kept open for the whole run:
+    /// the copies written there must stay readable for printing, saving and the Finder.
+    private var openTemporaryFolder: URL?
+
     private let defaults: UserDefaults
 
     private enum Keys {
@@ -139,6 +152,8 @@ final class AppSettings: ObservableObject {
         static let profileDisplayName = "profileDisplayName"
         static let saveFolderBookmark = "saveFolderBookmark"
         static let saveFolderDisplayName = "saveFolderDisplayName"
+        static let temporaryFolderBookmark = "temporaryFolderBookmark"
+        static let temporaryFolderDisplayName = "temporaryFolderDisplayName"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -159,6 +174,8 @@ final class AppSettings: ObservableObject {
         self.profileDisplayName = defaults.string(forKey: Keys.profileDisplayName) ?? ""
         self.saveFolderBookmark = defaults.data(forKey: Keys.saveFolderBookmark)
         self.saveFolderDisplayName = defaults.string(forKey: Keys.saveFolderDisplayName) ?? ""
+        self.temporaryFolderBookmark = defaults.data(forKey: Keys.temporaryFolderBookmark)
+        self.temporaryFolderDisplayName = defaults.string(forKey: Keys.temporaryFolderDisplayName) ?? ""
     }
 
     func chooseProfile(at url: URL) throws {
@@ -217,6 +234,48 @@ final class AppSettings: ObservableObject {
     func clearSaveFolder() {
         saveFolderBookmark = nil
         saveFolderDisplayName = ""
+    }
+
+    func chooseTemporaryFolder(at url: URL) throws {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+        let bookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        closeTemporaryFolder()
+        temporaryFolderBookmark = bookmark
+        temporaryFolderDisplayName = url.path
+    }
+
+    /// Back to the system temporary folder.
+    func clearTemporaryFolder() {
+        closeTemporaryFolder()
+        temporaryFolderBookmark = nil
+        temporaryFolderDisplayName = ""
+    }
+
+    /// The chosen temporary folder, opened for access, or nil when none is chosen. Throws when a
+    /// folder is chosen but cannot be reached (deleted, disconnected drive).
+    func temporaryFolder() throws -> URL? {
+        guard let temporaryFolderBookmark else { return nil }
+        if let openTemporaryFolder { return openTemporaryFolder }
+        var isStale = false
+        let url = try URL(resolvingBookmarkData: temporaryFolderBookmark, options: [.withSecurityScope],
+                          relativeTo: nil, bookmarkDataIsStale: &isStale)
+        var isDirectory: ObjCBool = false
+        let opened = url.startAccessingSecurityScopedResource()
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            if opened { url.stopAccessingSecurityScopedResource() }
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        if isStale, let renewed = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+            self.temporaryFolderBookmark = renewed
+        }
+        if opened { openTemporaryFolder = url }
+        return url
+    }
+
+    private func closeTemporaryFolder() {
+        openTemporaryFolder?.stopAccessingSecurityScopedResource()
+        openTemporaryFolder = nil
     }
 
     func clearProfile() {

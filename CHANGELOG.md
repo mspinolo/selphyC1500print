@@ -12,7 +12,15 @@ Eighth pre-release. Not verified on physical prints.
   profile and stopped with an error shown only in the status line. Access is now opened before the
   conversion (and by the conversion itself), and a failure is shown in an alert.
 
+### Added
+- Settings > **Temporary copies**: choose the folder for the generated copies (default: the system
+  temporary folder). The app writes to a subfolder "SELPHY CP1500 Print temporary" there; if the
+  folder cannot be reached, the system one is used and the status line says so.
+
 ### Changed
+- The 24-hour clean-up removes only the app's own session folders (UUID-named) in its subfolder,
+  nothing else.
+- README brought up to date (printing, files and privacy, language setting, test suites).
 - "Generate test copies" is now **Generate corrected copies**, with a tooltip saying what it does
   and how many photos it converts; when it is disabled, the reason (no profile, no photos) is shown
   next to it.

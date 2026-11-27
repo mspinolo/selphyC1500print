@@ -122,6 +122,7 @@ enum ColorCorrectionService {
         intent: RenderingIntent,
         blackPointCompensation: Bool,
         outputFormat: OutputFormat = .png,
+        temporaryParent: URL? = nil,
         progress: ((_ completed: Int, _ total: Int) -> Void)? = nil,
         shouldCancel: (() -> Bool)? = nil
     ) throws -> Result {
@@ -143,7 +144,7 @@ enum ColorCorrectionService {
             blackPointCompensation: blackPointCompensation
         )
 
-        let sessionFolder = try makeSessionFolder()
+        let sessionFolder = try makeSessionFolder(in: temporaryParent)
         var transformCache: [Data: ColorTransform] = [:]
         var outputs: [URL] = []
         var assumedSRGB: [URL] = []
@@ -514,20 +515,32 @@ enum ColorCorrectionService {
         return output
     }
 
-    private static func makeSessionFolder() throws -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("SELPHYCP1500Print", isDirectory: true)
+    /// Name of the subfolder that holds the sessions in a folder chosen by the user.
+    static let temporarySubfolderName = "SELPHY CP1500 Print temporary"
+
+    /// Where the sessions live: a subfolder of the chosen folder, or of the system temporary folder.
+    static func sessionRoot(in parent: URL?) -> URL {
+        if let parent { return parent.appendingPathComponent(temporarySubfolderName, isDirectory: true) }
+        return FileManager.default.temporaryDirectory.appendingPathComponent("SELPHYCP1500Print", isDirectory: true)
+    }
+
+    static func makeSessionFolder(in parent: URL? = nil, now: Date = Date()) throws -> URL {
+        let root = sessionRoot(in: parent)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
-        // Remove abandoned sessions older than one day; never touch source photos.
+        // Remove abandoned sessions older than one day. Only the app's own session folders (named
+        // with a UUID) inside its own subfolder are removed: never source photos, never anything
+        // else the user keeps in a folder they chose.
         if let entries = try? FileManager.default.contentsOfDirectory(
             at: root,
-            includingPropertiesForKeys: [.contentModificationDateKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) {
-            let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-            for entry in entries {
-                let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let cutoff = now.addingTimeInterval(-24 * 60 * 60)
+            for entry in entries where UUID(uuidString: entry.lastPathComponent) != nil {
+                let values = try? entry.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey])
+                guard values?.isDirectory == true else { continue }
+                let modified = values?.contentModificationDate ?? .distantPast
                 if modified < cutoff {
                     try? FileManager.default.removeItem(at: entry)
                 }

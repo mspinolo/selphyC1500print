@@ -226,7 +226,9 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                 }
             }
-            Text(tr("These copies are temporary and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted."))
+            Text(settings.temporaryFolderBookmark == nil
+                 ? tr("These copies are temporary and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted.")
+                 : trf("These copies are temporary (in %@) and are removed after 24 hours. To keep them, save them to a folder: existing files are never overwritten or deleted.", settings.temporaryFolderDisplayName))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if settings.saveFolderBookmark != nil {
@@ -438,6 +440,17 @@ struct ContentView: View {
             }
 
             let photoURLs = selectedPhotos
+            // The chosen temporary folder (kept open by the settings), or the system one if it is
+            // not reachable.
+            let parent: URL?
+            let temporaryFallback: Bool
+            do {
+                parent = try settings.temporaryFolder()
+                temporaryFallback = false
+            } catch {
+                parent = nil
+                temporaryFallback = true
+            }
             let intent = settings.renderingIntent
             let bpc = settings.blackPointCompensation
             let format = settings.outputFormat
@@ -458,6 +471,7 @@ struct ContentView: View {
                     intent: intent,
                     blackPointCompensation: bpc,
                     outputFormat: format,
+                    temporaryParent: parent,
                     progress: { done, total in batchProgress.update(completed: done, total: total) },
                     shouldCancel: { Task.isCancelled }
                 )
@@ -481,6 +495,9 @@ struct ContentView: View {
                     var message = trn(result.files.count, one: "Generated 1 temporary copy. It was not sent to the printer.", other: "Generated %d temporary copies. They were not sent to the printer.")
                     if !result.assumedSRGBSources.isEmpty {
                         message += trf(" No embedded profile (assumed sRGB): %@.", result.assumedSRGBSources.map(\.lastPathComponent).joined(separator: ", "))
+                    }
+                    if temporaryFallback {
+                        message += " " + trf("The chosen temporary folder (%@) cannot be reached: the system temporary folder was used.", settings.temporaryFolderDisplayName)
                     }
                     if !result.convertedSources.isEmpty {
                         message += trf(" Converted to sRGB first (grey/CMYK/Lab): %@.", result.convertedSources.map(\.lastPathComponent).joined(separator: ", "))

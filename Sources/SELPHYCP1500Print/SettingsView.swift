@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var profileMessage: String?
     @State private var profileFailed = false
     @State private var profileDropTargeted = false
+    @State private var temporaryFolderMessage: String?
 
     /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile.
     private var blackPointCompensationForced: Bool {
@@ -84,6 +85,33 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section(tr("Temporary copies")) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(settings.temporaryFolderBookmark == nil ? tr("System temporary folder") : settings.temporaryFolderDisplayName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(trf("The corrected copies are written to a subfolder named “%@”; sessions older than 24 hours are removed when new copies are made. Nothing else in the folder is touched.",
+                                 ColorCorrectionService.temporarySubfolderName))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    if settings.temporaryFolderBookmark != nil {
+                        Button(tr("Use the system folder")) { settings.clearTemporaryFolder() }
+                    }
+                    Button(tr("Choose folder…")) { chooseTemporaryFolder() }
+                }
+                Button(tr("Show in Finder")) { revealTemporaryFolder() }
+                    .buttonStyle(.link)
+                if let temporaryFolderMessage {
+                    Label(temporaryFolderMessage, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
+            }
+
             Section(tr("General")) {
                 Picker(tr("Language"), selection: $settings.language) {
                     ForEach(AppLanguage.allCases) { language in
@@ -117,6 +145,34 @@ struct SettingsView: View {
             allowsMultipleSelection: false,
             onCompletion: handleProfileSelection
         )
+    }
+
+    private func chooseTemporaryFolder() {
+        // NSOpenPanel rather than a second fileImporter on this view (SwiftUI keeps only one).
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = tr("Use this folder")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try settings.chooseTemporaryFolder(at: url)
+            temporaryFolderMessage = nil
+        } catch {
+            temporaryFolderMessage = trf("The folder cannot be used: %@", error.localizedDescription)
+        }
+    }
+
+    /// Opens the folder that holds the temporary sessions (creating it if needed).
+    private func revealTemporaryFolder() {
+        do {
+            let root = ColorCorrectionService.sessionRoot(in: try settings.temporaryFolder())
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(root)
+            temporaryFolderMessage = nil
+        } catch {
+            temporaryFolderMessage = trf("The chosen temporary folder cannot be reached: %@", error.localizedDescription)
+        }
     }
 
     /// Selects the remembered profile in a Finder window.
