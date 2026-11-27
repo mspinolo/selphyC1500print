@@ -32,7 +32,6 @@ enum ItalianStrings {
         "Saved to %@": "Salvate in %@",
         "Open folder": "Apri la cartella",
         "Cancel": "Annulla",
-        "Generate test copies": "Genera copie di prova",
         "Language": "Lingua",
         "Folder selection failed: %@": "Selezione cartella non riuscita: %@",
         "The save folder is no longer reachable: choose it again.": "La cartella di salvataggio non è più raggiungibile: sceglila di nuovo.",
@@ -414,5 +413,12 @@ enum ItalianStrings {
         "%.0f%% of the sampled colours lie outside the printer's gamut outline.": "Il %.0f%% dei colori campionati cade fuori dal contorno del gamut della stampante.",
         "Colours and printer gamut (a*-b*, selected photo)": "Colori e gamut della stampante (a*-b*, fotografia selezionata)",
         "Seen from above (lightness flattened): for each hue the most saturated colour the printer reaches at any lightness, against sRGB, with a sample of the photo's colours. A colour inside the outline may still be out of reach at its own lightness: the Out of gamut view and the dull-colour marks take lightness into account.": "Visto dall'alto (luminosità schiacciata): per ogni tinta il colore più saturo che la stampante raggiunge a qualsiasi luminosità, a confronto con sRGB, con un campione dei colori della foto. Un colore dentro il contorno può comunque essere irraggiungibile alla sua luminosità: la vista Fuori gamut e i segni dei colori spenti tengono conto della luminosità.",
+        "Generate corrected copies": "Genera copie corrette",
+        "Choose the ICC profile in Settings first.": "Scegli prima il profilo ICC nelle Impostazioni.",
+        "Add photos to the list first.": "Aggiungi prima delle foto all'elenco.",
+        "Converts the photo in the list with the printer profile into a corrected copy to print or save. The original is not changed.": "Converte la foto dell'elenco con il profilo della stampante in una copia corretta da stampare o salvare. L'originale non viene modificato.",
+        "Converts the %d photos in the list with the printer profile into corrected copies to print or save. The originals are not changed.": "Converte le %d foto dell'elenco con il profilo della stampante in copie corrette da stampare o salvare. Gli originali non vengono modificati.",
+        "The corrected copies could not be generated": "Non è stato possibile generare le copie corrette",
+        "OK": "OK",
     ]
 }

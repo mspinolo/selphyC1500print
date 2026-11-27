@@ -40,6 +40,8 @@ struct ContentView: View {
     @State private var conversionWork: Task<ColorCorrectionService.Result, Error>?
     /// nil = the initial hint, so that it follows the selected language.
     @State private var statusOverride: String?
+    /// A failed conversion, shown in an alert (the status line alone was easy to miss).
+    @State private var conversionError: String?
 
     /// `initialPhotos` is only used to present the window with photos already loaded (snapshots).
     init(initialPhotos: [URL] = []) {
@@ -113,6 +115,13 @@ struct ContentView: View {
                 }
                 .help(tr("Settings"))
             }
+        }
+        .alert(tr("The corrected copies could not be generated"), isPresented: Binding(
+            get: { conversionError != nil },
+            set: { if !$0 { conversionError = nil } })) {
+            Button(tr("OK")) {}
+        } message: {
+            Text(conversionError ?? "")
         }
         .fileImporter(
             isPresented: $showingPhotoPicker,
@@ -279,9 +288,18 @@ struct ContentView: View {
                     Button(tr("Cancel")) { conversionWork?.cancel() }
                         .keyboardShortcut(.cancelAction)
                 } else {
-                    Button(tr("Generate test copies")) { prepareCopies() }
-                        .disabled(selectedPhotos.isEmpty || settings.profileBookmark == nil)
+                    if let reason = generateUnavailableReason {
+                        Text(reason)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button(tr("Generate corrected copies")) { prepareCopies() }
+                        .disabled(generateUnavailableReason != nil)
                         .keyboardShortcut(.defaultAction)
+                        .help(generateUnavailableReason ?? trn(
+                            selectedPhotos.count,
+                            one: "Converts the photo in the list with the printer profile into a corrected copy to print or save. The original is not changed.",
+                            other: "Converts the %d photos in the list with the printer profile into corrected copies to print or save. The originals are not changed."))
                 }
             }
         }
@@ -405,6 +423,13 @@ struct ContentView: View {
     /// The responder-chain action ("showSettingsWindow:") does nothing on macOS 14+: use the environment action.
     private func showSettings() { openSettings() }
 
+    /// Why the corrected copies cannot be generated yet, shown next to the disabled button.
+    private var generateUnavailableReason: String? {
+        if settings.profileBookmark == nil { return tr("Choose the ICC profile in Settings first.") }
+        if selectedPhotos.isEmpty { return tr("Add photos to the list first.") }
+        return nil
+    }
+
     private func prepareCopies() {
         do {
             guard let profileURL = try settings.resolveProfileURL() else {
@@ -421,6 +446,9 @@ struct ContentView: View {
 
             progress.update(completed: 0, total: photoURLs.count)
             let batchProgress = progress
+            // Open access to the bookmarked profile before the conversion starts (it used to be
+            // opened afterwards, so the conversion could not read the profile in the sandbox).
+            let hasProfileAccess = profileURL.startAccessingSecurityScopedResource()
             // A detached task is not cancelled with its parent: the handle is kept so that the
             // Annulla button can cancel the conversion itself.
             let work = Task.detached(priority: .userInitiated) {
@@ -437,7 +465,6 @@ struct ContentView: View {
             conversionWork = work
 
             Task {
-                let hasProfileAccess = profileURL.startAccessingSecurityScopedResource()
                 defer {
                     if hasProfileAccess {
                         profileURL.stopAccessingSecurityScopedResource()
@@ -463,6 +490,7 @@ struct ContentView: View {
                     statusMessage = tr("Conversion cancelled. No files were created.")
                 } catch {
                     statusMessage = trf("Conversion failed: %@", error.localizedDescription)
+                    conversionError = statusMessage
                 }
                 conversionWork = nil
                 isPreparing = false

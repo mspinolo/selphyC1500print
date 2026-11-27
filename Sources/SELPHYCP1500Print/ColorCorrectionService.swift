@@ -127,6 +127,10 @@ enum ColorCorrectionService {
     ) throws -> Result {
         let printerICC: Data
         do {
+            // The profile comes from a security-scoped bookmark: in the sandbox it can be read
+            // only with access open (an extra start/stop by the caller is harmless).
+            let hasProfileAccess = printerProfileURL.startAccessingSecurityScopedResource()
+            defer { if hasProfileAccess { printerProfileURL.stopAccessingSecurityScopedResource() } }
             printerICC = try Data(contentsOf: printerProfileURL)
         } catch {
             throw CorrectionError.profileLoad(error.localizedDescription)

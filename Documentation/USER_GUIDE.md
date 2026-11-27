@@ -37,7 +37,9 @@ it prints through AirPrint (USB or Wi-Fi), without a Canon driver.
   Zoom with the zoom control; the line under the image reads the colour under the pointer.
 - **Bottom bar**: the rendering intent (*Perceptual* by default; *Relative colorimetric* keeps
   in-gamut colours more exactly) and the output format (PNG lossless by default, or JPEG), then
-  **Generate**. The copies appear in the strip above the bar, where you can **Print…** or save them.
+  **Generate corrected copies**: every photo in the list is converted into a corrected copy (the
+  originals are not touched). The copies appear in the strip above the bar, where you can
+  **Print…** them or save them to a folder (they are temporary otherwise, removed after 24 hours).
 
 The preview is a soft proof: it uses the printer profile's model and your display's profile.
 *Simulate paper white* and *Monitor black* (view options) make it closer to the look of a print

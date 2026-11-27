@@ -3,6 +3,20 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.8] - 2026-11-27
+Eighth pre-release. Not verified on physical prints.
+
+### Fixed
+- **Generating the corrected copies did nothing useful in the app**: the conversion started before
+  access to the bookmarked printer profile was opened, so in the sandbox it could not read the
+  profile and stopped with an error shown only in the status line. Access is now opened before the
+  conversion (and by the conversion itself), and a failure is shown in an alert.
+
+### Changed
+- "Generate test copies" is now **Generate corrected copies**, with a tooltip saying what it does
+  and how many photos it converts; when it is disabled, the reason (no profile, no photos) is shown
+  next to it.
+
 ## [0.0.7] - 2026-11-27
 Seventh pre-release. Not verified on physical prints.
 
