@@ -349,8 +349,8 @@ final class FullScreenModel: ObservableObject {
                         sourceURL: url, printerICC: printerICC, display: display, options: options, order: order,
                         isCancelled: { cancelled.isSet },
                         deliver: { layer, image in
-                            Task { @MainActor [weak self] in
-                                guard let self, self.currentLoad == loadID else { return }
+                            Task { @MainActor in
+                                guard self.currentLoad == loadID else { return }
                                 self.fullLayers[layer] = image
                                 self.imageSize = CGSize(width: image.width, height: image.height)
                                 self.offset = self.clamped(self.offset)

@@ -1,8 +1,6 @@
 // swift-tools-version: 6.4
 import PackageDescription
 
-let swiftSettings: [SwiftSetting] = []
-
 let package = Package(
     name: "SELPHYCP1500Print",
     // macOS 27.0 for now; 27.2 (owner's target) as soon as the CI runner image runs 27.2, so that
@@ -36,17 +34,14 @@ let package = Package(
         .executableTarget(
             name: "SELPHYCP1500Print",
             dependencies: ["SELPHYColorCore"],
-            path: "Sources/SELPHYCP1500Print",
-            swiftSettings: swiftSettings
+            path: "Sources/SELPHYCP1500Print"
         ),
         .testTarget(
             name: "SELPHYCP1500PrintTests",
             dependencies: ["SELPHYCP1500Print", "SELPHYColorCore"],
-            path: "Tests/SELPHYCP1500PrintTests",
-            swiftSettings: swiftSettings
+            path: "Tests/SELPHYCP1500PrintTests"
         )
     ],
-    // Step 1 of the move to Swift 6: new tools and SDK, Swift 5 language mode; step 2 turns on
-    // the Swift 6 mode (complete concurrency checking).
-    swiftLanguageModes: [.v5]
+    // Swift 6 language mode: complete, compile-time data-race checking.
+    swiftLanguageModes: [.v6]
 )

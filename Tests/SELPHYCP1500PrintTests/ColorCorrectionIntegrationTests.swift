@@ -183,7 +183,7 @@ final class ColorCorrectionIntegrationTests: XCTestCase {
             try? FileManager.default.removeItem(at: untagged)
         }
         let src = try XCTUnwrap(CGImageSourceCreateWithURL(untagged as CFURL, nil))
-        let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
+        XCTAssertNotNil(CGImageSourceCreateImageAtIndex(src, 0, nil))
         var centres: [[UInt8]] = []
         for url in [tagged, untagged] {
             let result = try ColorCorrectionService.prepareCopies(

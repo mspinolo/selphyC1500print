@@ -590,7 +590,7 @@ private struct ColorDetails: View {
     }
 
     private func row(_ title: String, _ text: String) -> some View {
-        (Text(title + ": ").bold() + Text(text)).font(.caption)
+        Text("\(Text(title + ": ").bold())\(text)").font(.caption)
     }
 
     @ViewBuilder
