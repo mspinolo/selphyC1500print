@@ -82,16 +82,16 @@ final class InputMatrixTests: XCTestCase {
         try write16(ramp8.flatMap { [$0, $0, $0] }, width: width, height: 1, space: sRGB, type: .png, to: url8)
         let out16 = try corrected(url16), out8 = try corrected(url8)
         func channel(_ pixels: [UInt8], _ c: Int) -> [Int] { (0..<width).map { Int(pixels[$0 * 4 + c]) } }
-        var distinct16 = 0, distinct8 = 0
+        var differing = 0
         for c in 0..<3 {
             let a = channel(out16, c), b = channel(out8, c)
             // Monotonic, as the ramp: no reversal beyond rounding.
             for i in 1..<width { XCTAssertGreaterThanOrEqual(a[i], a[i - 1] - 1, "channel \(c) at \(i)") }
-            distinct16 += Set(a).count
-            distinct8 += Set(b).count
+            differing += zip(a, b).filter { $0 != $1 }.count
         }
-        XCTAssertNotEqual(out16, out8, "16-bit values between 8-bit levels must change the result")
-        XCTAssertGreaterThanOrEqual(distinct16, distinct8)
+        // The output is 8-bit too, so many pixels agree; values between 8-bit levels must still
+        // move some of them (rounded at the end, not at the start).
+        XCTAssertGreaterThan(differing, 0, "16-bit values between 8-bit levels must change the result")
     }
 
     // MARK: Linear

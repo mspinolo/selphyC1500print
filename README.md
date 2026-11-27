@@ -2,17 +2,19 @@
 
 A native macOS utility for experimental pre-correction of images (JPEG, JPEG XL, PNG, TIFF) for the Canon SELPHY CP1500. The colour conversion runs in a portable, tested C core built on LittleCMS (vendored, MIT).
 
-> **Status: experimental.** The pre-correction is implemented, builds and is exercised by CI. The colour model is trusted on the vendor's (Farbenwerk's) documentation and has **not** been validated with physical prints. Direct printing remains disabled. Plan and evidence levels: `Documentation/ROADMAP.md`.
+> **Status: experimental pre-release.** The pre-correction, the soft-proof preview, the analysis tools and printing through the macOS print dialog are implemented and exercised by CI. The colour model is trusted on the vendor's (Farbenwerk's) documentation and has **not** yet been validated with physical prints: the app's *Print validation assistant* (menu Advanced) is the way to do it. Plan and evidence levels: `Documentation/ROADMAP.md`.
 
-## Current milestone
+**How to use it: [`Documentation/USER_GUIDE.md`](Documentation/USER_GUIDE.md).**
 
-- Native SwiftUI macOS interface.
-- Persistent printer name, rendering intent, BPC preference and security-scoped ICC bookmark.
-- Structural ICC validation.
-- LittleCMS transform (16-bit internally) from the source image's embedded RGB profile (or assumed sRGB when absent) through PCS to the Farbenwerk printer profile's RGB device values. Black point compensation follows the ICC rules: always applied for perceptual/saturation with a v4 profile, optional for relative colorimetric.
-- Temporary copies in PNG (default, lossless: no lossy codec after the correction) or, optionally, JPEG (quality 0.98, smaller files). Sources are decoded at 16 bits per component; transparent areas are composited on white. Output is the corrected numeric RGB values tagged as sRGB for the SELPHY's fixed internal color pipeline.
-- EXIF orientation is applied when decoding; source files are read-only.
-- Temporary sessions are stored under the system temporary directory and abandoned sessions older than 24 hours are removed on the next conversion.
+## Features
+
+- Pre-correction through the Farbenwerk profile with LittleCMS (16-bit internally), from the photo's embedded profile (sRGB when absent); BPC per the ICC rules. PNG (default, lossless) or JPEG output, tagged sRGB.
+- Soft-proof preview (original, without/with correction, compare, ΔE map, dark zones, out of gamut, postcard layout) and a full-screen view at full resolution on a neutral grey.
+- Statistics window: ΔE00 statistics and histogram, ΔE00 distribution scope (image width/height, lightness, hue), a*-b* gamut plot, intent comparison, CSV/PDF export.
+- Printing through the macOS print dialog (AirPrint).
+- Print validation assistant: test chart, blind print order, scanner check on a ColorChecker (all editions; default: Classic before November 2014), automatic analysis of the chart scans, gates and report.
+- English and Italian; light, dark and neutral grey themes.
+- Inputs: JPEG, JPEG XL, PNG, TIFF (8/16 bit, any embedded RGB profile, greyscale/CMYK converted); EXIF orientation applied; originals never modified.
 
 ## Color workflow: important caveat
 

@@ -144,7 +144,7 @@ enum ReferenceImport {
             case "END_DATA": inData = false; continue
             default: break
             }
-            let tokens = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            let tokens = cgatsTokens(line)
             if inFormat { format += tokens.map { $0.uppercased() } }
             if inData, !tokens.isEmpty { rows.append(tokens) }
         }
@@ -156,7 +156,7 @@ enum ReferenceImport {
                 guard row.count > max(li, ai, bi), let l = number(row[li]), let a = number(row[ai]), let b = number(row[bi]) else {
                     throw ImportError.badValue(index + 1)
                 }
-                patches.append(ReferencePatch(name: nameIndex.map { row[$0].trimmingCharacters(in: CharacterSet(charactersIn: "\"")) } ?? "\(index + 1)",
+                patches.append(ReferencePatch(name: nameIndex.map { row[$0] } ?? "\(index + 1)",
                                               l: l, a: a, b: b))
             }
         } else if let xi = column("XYZ_X"), let yi = column("XYZ_Y"), let zi = column("XYZ_Z") {
@@ -171,6 +171,29 @@ enum ReferenceImport {
             throw ImportError.missingColumns
         }
         return patches
+    }
+
+    /// Splits a CGATS line on blanks, keeping quoted strings ("dark skin") as one token.
+    static func cgatsTokens(_ line: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var quoted = false
+        var hasToken = false
+        for character in line {
+            if character == "\"" {
+                quoted.toggle()
+                hasToken = true
+            } else if !quoted && (character == " " || character == "\t") {
+                if hasToken { tokens.append(current) }
+                current = ""
+                hasToken = false
+            } else {
+                current.append(character)
+                hasToken = true
+            }
+        }
+        if hasToken { tokens.append(current) }
+        return tokens
     }
 
     private static func number(_ text: String) -> Double? {

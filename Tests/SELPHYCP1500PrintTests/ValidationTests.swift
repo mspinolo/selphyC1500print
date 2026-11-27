@@ -119,7 +119,7 @@ final class ValidationTests: XCTestCase {
         let written = try XCTUnwrap(CGImageSourceCreateWithURL(png as CFURL, nil))
         let properties = CGImageSourceCopyPropertiesAtIndex(written, 0, nil) as! [CFString: Any]
         XCTAssertEqual(properties[kCGImagePropertyDPIWidth] as! Double, 300, accuracy: 0.1)
-        XCTAssertEqual(chart.aspect, (1073 - 122) / (1640 - 122.0), accuracy: 1e-12)
+        XCTAssertEqual(chart.aspect, hypot(1073 - 122, 108 - 122) / hypot(108 - 122, 1640 - 122.0), accuracy: 1e-12)
     }
 
     // MARK: Scan analysis
@@ -354,5 +354,13 @@ final class ValidationTests: XCTestCase {
         XCTAssertNotEqual(try data(.v1), try data(.v2))
         let key = try String(contentsOf: target.appendingPathComponent("KEY - open only after scanning/run-plan.csv"), encoding: .utf8)
         XCTAssertEqual(key, ValidationPlan.keyCSV(plan))
+    }
+}
+
+final class CGATSTokenTests: XCTestCase {
+    func testQuotedNamesStayWhole() {
+        XCTAssertEqual(ReferenceImport.cgatsTokens("\"dark skin\" 37.9 13.5\t14.0"), ["dark skin", "37.9", "13.5", "14.0"])
+        XCTAssertEqual(ReferenceImport.cgatsTokens("  A1   96.5  "), ["A1", "96.5"])
+        XCTAssertEqual(ReferenceImport.cgatsTokens("\"\" 1"), ["", "1"])
     }
 }

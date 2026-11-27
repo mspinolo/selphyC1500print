@@ -304,36 +304,54 @@ struct StatisticsView: View {
 
     private func histogram(_ s: DeviationStatistics) -> some View {
         let upper = s.histogram.last?.upper ?? 12
-        return Chart {
-            ForEach(s.histogram) { bin in
-                BarMark(
-                    xStart: .value("from", bin.lower), xEnd: .value("to", bin.upper),
-                    y: .value("share", bin.share * 100)
-                )
-                .foregroundStyle(by: .value("band", DeviationBand.band(forLower: bin.lower).title))
+        // Rectangles with all four edges given (no fallback bar width), explicit axes, and the
+        // axis titles as plain text: this avoids the two Charts warnings of the earlier version.
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(tr("% of pixels")).font(.caption2).foregroundStyle(.secondary)
+            Chart {
+                ForEach(s.histogram) { bin in
+                    RectangleMark(
+                        xStart: .value("from", bin.lower), xEnd: .value("to", bin.upper),
+                        yStart: .value("zero", 0.0), yEnd: .value("share", bin.share * 100)
+                    )
+                    .foregroundStyle(by: .value("band", DeviationBand.band(forLower: bin.lower).title))
+                }
+                RuleMark(x: .value("mean", min(s.mean, upper)))
+                    .foregroundStyle(Color.primary.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .annotation(position: .top, alignment: .leading) {
+                        Text(tr("mean")).font(.caption2).foregroundStyle(.secondary)
+                    }
+                RuleMark(x: .value("p95", min(s.p95, upper)))
+                    .foregroundStyle(Color.primary.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [1, 2]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text(tr("95th pct")).font(.caption2).foregroundStyle(.secondary)
+                    }
             }
-            RuleMark(x: .value("mean", min(s.mean, upper)))
-                .foregroundStyle(Color.primary.opacity(0.7))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .annotation(position: .top, alignment: .leading) {
-                    Text(tr("mean")).font(.caption2).foregroundStyle(.secondary)
+            .chartForegroundStyleScale(
+                domain: DeviationBand.allCases.map(\.title),
+                range: DeviationBand.allCases.map(\.color)
+            )
+            .chartXScale(domain: 0...upper)
+            .chartXAxis {
+                AxisMarks(values: [0, 1, 2, 3, 4, 6, 8, 10, 12]) { _ in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel()
                 }
-            RuleMark(x: .value("p95", min(s.p95, upper)))
-                .foregroundStyle(Color.primary.opacity(0.7))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [1, 2]))
-                .annotation(position: .top, alignment: .trailing) {
-                    Text(tr("95th pct")).font(.caption2).foregroundStyle(.secondary)
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine()
+                    AxisValueLabel()
                 }
+            }
+            .chartLegend(position: .bottom, alignment: .leading)
+            .frame(height: 190)
+            Text(tr("ΔE00 (the last bar collects everything above)")).font(.caption2).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
-        .chartForegroundStyleScale(
-            domain: DeviationBand.allCases.map(\.title),
-            range: DeviationBand.allCases.map(\.color)
-        )
-        .chartXScale(domain: 0...upper)
-        .chartXAxisLabel(tr("ΔE00 (the last bar collects everything above)"))
-        .chartYAxisLabel(tr("% of pixels"))
-        .chartLegend(position: .bottom, alignment: .leading)
-        .frame(height: 190)
     }
 
     private func zones(_ s: DeviationStatistics) -> some View {
