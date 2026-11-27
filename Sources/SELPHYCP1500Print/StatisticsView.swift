@@ -12,6 +12,9 @@ final class StatisticsModel: ObservableObject {
     @Published private(set) var total = 0
     @Published private(set) var isWorking = false
     @Published private(set) var scope: DeltaEScope?
+    @Published private(set) var gamutPoints: [GamutPoint] = []
+    @Published private(set) var printerOutline: GamutOutline?
+    private var outlineDigest: Data?
 
     /// The analysis maps of the photo in the scope, kept so that changing the axis is immediate.
     private var scopeMaps: PixelMaps?
@@ -96,11 +99,17 @@ final class StatisticsModel: ObservableObject {
         }
         guard let maps else {
             scope = nil
+            gamutPoints = []
             return
         }
-        let made = await Task.detached(priority: .utility) { DeltaEScope.make(maps: maps, axis: axis) }.value
+        if outlineDigest != profileDigest {
+            printerOutline = await Task.detached(priority: .utility) { GamutOutline.printer(icc: printerICC) }.value
+            outlineDigest = profileDigest
+        }
+        let made = await Task.detached(priority: .utility) { (DeltaEScope.make(maps: maps, axis: axis), GamutPoint.sample(maps)) }.value
         if Task.isCancelled { return }
-        scope = made
+        scope = made.0
+        gamutPoints = made.1
     }
 
     func loadIntents(photo: URL?, printerICC: Data, profileDigest: Data, blackPointCompensation: Bool) async {
@@ -171,6 +180,7 @@ struct StatisticsView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             detail
                             scopeSection
+                            gamutSection
                             intents
                             Text(tr("Computed on a reduced copy of each photo, from the printer profile's model: estimates, not print measurements."))
                                 .font(.caption)
@@ -375,6 +385,24 @@ struct StatisticsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             Text(tr("ΔE00 distribution (selected photo)"))
+        }
+    }
+
+    private var gamutSection: some View {
+        GroupBox(tr("Colours and printer gamut (a*-b*, selected photo)")) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let outline = model.printerOutline {
+                    GamutPlotView(printer: outline, points: model.gamutPoints)
+                } else {
+                    Text(tr("Computing…")).foregroundStyle(.secondary)
+                }
+                Text(tr("Seen from above (lightness flattened): for each hue the most saturated colour the printer reaches at any lightness, against sRGB, with a sample of the photo's colours. A colour inside the outline may still be out of reach at its own lightness: the Out of gamut view and the dull-colour marks take lightness into account."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

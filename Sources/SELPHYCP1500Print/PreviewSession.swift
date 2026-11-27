@@ -474,8 +474,8 @@ final class PreviewSession: @unchecked Sendable {
             correctedDevice: corrected.correctedDevice, sRGBDevice: decoded.sRGBDevice,
             // The file as the system shows it, in its own colour space (a wide-gamut source keeps
             // its colours); the sRGB numbers only if ImageIO cannot make it.
-            original: Self.originalImage(url: sourceURL, maxDimension: options.maxDimension)
-                ?? (try ColorCorrectionService.makeImage(rgbx: decoded.sRGBDevice, width: decoded.width, height: decoded.height, colorSpace: sRGB)),
+            original: try Self.originalImage(url: sourceURL, maxDimension: options.maxDimension)
+                ?? ColorCorrectionService.makeImage(rgbx: decoded.sRGBDevice, width: decoded.width, height: decoded.height, colorSpace: sRGB),
             analysis: analysis,
             heatMap: try PreviewService.makeHeatMap(deltaE: analysis.deltaEMap, width: analysis.width, height: analysis.height),
             sourceDescription: PreviewService.describe(decoded.loaded),

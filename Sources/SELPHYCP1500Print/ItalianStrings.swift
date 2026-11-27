@@ -6,7 +6,7 @@ enum ItalianStrings {
         "Select an ICC profile and one or more photos (JPEG, JPEG XL, PNG, TIFF).": "Seleziona un profilo ICC e una o più fotografie (JPEG, JPEG XL, PNG, TIFF).",
         "Farbenwerk ICC profile": "Profilo ICC Farbenwerk",
         "No profile selected": "Nessun profilo selezionato",
-        "The path is remembered securely between launches.": "Il percorso viene ricordato in modo sicuro tra gli avvii.",
+        "The path is remembered securely between launches. You can also drag an .icc file here.": "Il percorso viene ricordato in modo sicuro tra gli avvii. Puoi anche trascinare qui un file .icc.",
         "Choose profile…": "Scegli profilo…",
         "Remove": "Rimuovi",
         "Colour management": "Gestione colore",
@@ -409,5 +409,10 @@ enum ItalianStrings {
         "sRGB": "sRGB",
         "scanner profile": "profilo dello scanner",
         "white (bottom left)": "bianco (in basso a sinistra)",
+        "printer (profile model)": "stampante (modello del profilo)",
+        "colours the print dulls": "colori che la stampa spegne",
+        "%.0f%% of the sampled colours lie outside the printer's gamut outline.": "Il %.0f%% dei colori campionati cade fuori dal contorno del gamut della stampante.",
+        "Colours and printer gamut (a*-b*, selected photo)": "Colori e gamut della stampante (a*-b*, fotografia selezionata)",
+        "Seen from above (lightness flattened): for each hue the most saturated colour the printer reaches at any lightness, against sRGB, with a sample of the photo's colours. A colour inside the outline may still be out of reach at its own lightness: the Out of gamut view and the dull-colour marks take lightness into account.": "Visto dall'alto (luminosità schiacciata): per ogni tinta il colore più saturo che la stampante raggiunge a qualsiasi luminosità, a confronto con sRGB, con un campione dei colori della foto. Un colore dentro il contorno può comunque essere irraggiungibile alla sua luminosità: la vista Fuori gamut e i segni dei colori spenti tengono conto della luminosità.",
     ]
 }

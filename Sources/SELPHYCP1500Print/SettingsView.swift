@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var profileReport: ICCProfileReport?
     @State private var profileMessage: String?
     @State private var profileFailed = false
+    @State private var profileDropTargeted = false
 
     /// BPC is mandatory for perceptual/saturation with an ICC v4 printer profile.
     private var blackPointCompensationForced: Bool {
@@ -24,7 +25,7 @@ struct SettingsView: View {
                         Text(settings.profileDisplayName.isEmpty ? tr("No profile selected") : settings.profileDisplayName)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text(tr("The path is remembered securely between launches."))
+                        Text(tr("The path is remembered securely between launches. You can also drag an .icc file here."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -39,6 +40,14 @@ struct SettingsView: View {
                         }
                     }
                 }
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2).opacity(profileDropTargeted ? 1 : 0))
+                // A profile dragged from the Finder is chosen like one picked in the dialog.
+                .dropDestination(for: URL.self) { urls, _ in
+                    guard let url = urls.first(where: { ["icc", "icm"].contains($0.pathExtension.lowercased()) }) else { return false }
+                    handleProfileSelection(.success([url]))
+                    return true
+                } isTargeted: { profileDropTargeted = $0 }
                 if let report = profileReport {
                     Label(report.summary, systemImage: report.isExpectedPrinterProfile ? "checkmark.seal" : "exclamationmark.triangle")
                         .foregroundStyle(report.isExpectedPrinterProfile ? .green : .orange)

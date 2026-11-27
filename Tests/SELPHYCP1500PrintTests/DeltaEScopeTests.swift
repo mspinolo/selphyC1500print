@@ -85,3 +85,43 @@ final class DeltaEScopeTests: XCTestCase {
                         .densityImage(), "nothing to draw")
     }
 }
+
+final class GamutPlotTests: XCTestCase {
+    func testOutlineIsTheLargestChromaPerHue() {
+        let outline = GamutOutline(labs: [[50, 40, 0], [60, 20, 0], [50, 0, 30], [50, -10, -10]])
+        XCTAssertEqual(outline.chroma(atHue: 0), 40)
+        XCTAssertEqual(outline.chroma(atHue: 90), 30)
+        XCTAssertEqual(outline.chroma(atHue: 225), (200.0).squareRoot(), accuracy: 1e-9)
+        XCTAssertEqual(outline.chroma(atHue: 360), 40, "hue wraps")
+        XCTAssertEqual(outline.chroma.count, GamutOutline.bins)
+    }
+
+    func testSRGBOutlineHasTheKnownPrimaries() {
+        // sRGB primaries in Lab D50 (relative): red C* about 104, blue about 131, green about 120.
+        let s = GamutOutline.sRGB
+        XCTAssertEqual(s.chroma.max() ?? 0, 131, accuracy: 6)
+        XCTAssertGreaterThan(s.chroma(atHue: 40), 95)
+        XCTAssertLessThan(s.chroma.min() ?? 0, s.chroma.max() ?? 0)
+        XCTAssertEqual(GamutOutline.cubeSurface(steps: 5).count, 5 * 5 * 6 * 3)
+    }
+
+    func testPrinterGamutIsSmallerThanSRGBInTheBlues() throws {
+        guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
+            throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run real-profile tests.")
+        }
+        let printer = try XCTUnwrap(GamutOutline.printer(icc: try Data(contentsOf: URL(fileURLWithPath: path))))
+        // A dye-sublimation print does not reach the saturated sRGB blue.
+        XCTAssertLessThan(printer.chroma(atHue: 300), GamutOutline.sRGB.chroma(atHue: 300))
+        XCTAssertGreaterThan(printer.chroma.min() ?? 0, 10)
+    }
+
+    func testPointsAreSampledAndMarked() {
+        let maps = PixelMaps(width: 10, height: 10, deltaE: Array(repeating: 1, count: 100),
+                             intendedLab: (0..<100).flatMap { i -> [Float] in [50, Float(i % 2 == 0 ? 60 : 5), 0] },
+                             predictedLab: Array(repeating: [Float(50), 30, 0], count: 100).flatMap { $0 })
+        let points = GamutPoint.sample(maps, limit: 20)
+        XCTAssertEqual(points.count, 20)
+        XCTAssertTrue(points.contains { $0.dull }, "C* 60 printed at 30: dull")
+        XCTAssertTrue(points.contains { !$0.dull })
+    }
+}
