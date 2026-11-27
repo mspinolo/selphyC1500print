@@ -50,6 +50,11 @@ def lib():
         _lib.selphy_transform_free.argtypes = [ctypes.c_void_p]
         _lib.selphy_delta_e2000.argtypes = [ctypes.c_double * 3, ctypes.c_double * 3]
         _lib.selphy_delta_e2000.restype = ctypes.c_double
+        _lib.selphy_homography4.argtypes = [f64, f64, f64]
+        _lib.selphy_chart_find_marks.argtypes = [u16, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_char_p,
+                                                 ctypes.c_size_t, ctypes.c_double, f64]
+        _lib.selphy_chart_sample.argtypes = [u16, ctypes.c_size_t, ctypes.c_size_t, f64, f64, ctypes.c_size_t,
+                                             ctypes.c_double, ctypes.c_uint, u16]
         _lib.selphy_status_message.restype = ctypes.c_char_p
         _lib.selphy_status_message.argtypes = [ctypes.c_int]
     return _lib
@@ -131,3 +136,41 @@ def normalise_to_paper_white(lab, white_lab):
     """Re-express Lab relative to the paper white (media-relative), like the intended values."""
     xyz = lab_to_xyz(lab) / lab_to_xyz(np.asarray(white_lab)) * D50
     return xyz_to_lab(xyz)
+
+
+# ---- The app's chart analysis (C core), for cross-checks against analyze_scan.py ----
+
+class ChartError(RuntimeError):
+    def __init__(self, status):
+        super().__init__(lib().selphy_status_message(status).decode())
+        self.status = status
+
+
+def core_homography(src, dst):
+    """3x3 matrix mapping 4 src points to 4 dst points (the core's solver)."""
+    h = np.zeros(9, dtype=np.float64)
+    _check(lib().selphy_homography4(np.ascontiguousarray(src, dtype=np.float64).reshape(8),
+                                    np.ascontiguousarray(dst, dtype=np.float64).reshape(8), h))
+    return h.reshape(3, 3)
+
+
+def core_find_marks(rgb, icc, chart_aspect):
+    """Corner mark centres (tl, tr, br, bl) found by the core in a full-resolution scan."""
+    data = np.ascontiguousarray(rgb, dtype=np.uint16)
+    out = np.zeros(8, dtype=np.float64)
+    status = lib().selphy_chart_find_marks(data, data.shape[1], data.shape[0], icc, len(icc) if icc else 0,
+                                           float(chart_aspect), out)
+    if status != 0:
+        raise ChartError(status)
+    return out.reshape(4, 2)
+
+
+def core_sample(rgb, h, rects, inner=0.6, n=14):
+    """Per-rectangle median samples computed by the core (same lattice as analyze_scan.sample_rect)."""
+    data = np.ascontiguousarray(rgb, dtype=np.uint16)
+    r = np.ascontiguousarray(rects, dtype=np.float64).reshape(-1)
+    out = np.zeros((len(r) // 4, 3), dtype=np.uint16)
+    _check(lib().selphy_chart_sample(data, data.shape[1], data.shape[0],
+                                     np.ascontiguousarray(h, dtype=np.float64).reshape(9), r, len(r) // 4,
+                                     float(inner), int(n), out))
+    return out

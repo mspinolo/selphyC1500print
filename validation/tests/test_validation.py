@@ -152,6 +152,72 @@ class AnalysisTests(unittest.TestCase):
             analyze_scan.analyse(noicc, self.manifest, "X")
 
 
+class CoreChartAnalysisTests(unittest.TestCase):
+    """The app's C implementation of the scan analysis against this Python reference."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        _, cls.manifest = make_chart.build()
+        chart = np.array([f["centre"] for f in cls.manifest["fiducials"]])
+        cls.aspect = np.linalg.norm(chart[1] - chart[0]) / np.linalg.norm(chart[3] - chart[0])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_homography_matches_the_svd_solution(self):
+        src = np.array([[0, 0], [100, 0], [100, 150], [0, 150]], float)
+        dst = np.array([[12.5, 20.1], [230.2, 30.4], [225.0, 360.3], [5.2, 340.8]])
+        np.testing.assert_allclose(selphy_core.core_homography(src, dst), analyze_scan.homography(src, dst), rtol=1e-9, atol=1e-9)
+
+    def test_same_marks_and_samples_as_the_reference(self):
+        import tifffile
+        for variant, kw in (("V1", {"angle_deg": 2.3}), ("V0", {"angle_deg": -1.7, "quarter_turns": 2}),
+                            ("V0", {"angle_deg": 0.8, "quarter_turns": 1, "scale": 1.0})):
+            path = Path(self.tmp.name) / f"core-{variant}-{kw.get('quarter_turns', 0)}-{kw.get('scale', 2)}.tif"
+            simulate_scan.simulate(self.manifest, PROFILE, variant, str(path), **kw)
+            rgb, icc = analyze_scan.read_scan(path)
+            py_marks, chart = analyze_scan.find_fiducials(rgb, icc, self.manifest)
+            c_marks = selphy_core.core_find_marks(rgb, icc, self.aspect)
+            np.testing.assert_allclose(c_marks, py_marks, atol=1e-6, err_msg=f"marks {variant} {kw}")
+            h = analyze_scan.homography(chart, py_marks)
+            rects = [p["rect"] for p in self.manifest["patches"]] + [w["rect"] for w in self.manifest["white_samples"]]
+            py = np.array([analyze_scan.sample_rect(rgb, h, r) for r in rects])
+            c = selphy_core.core_sample(rgb, selphy_core.core_homography(chart, c_marks), rects)
+            # Identical except where a lattice point sits on a rounding tie: at most one 16-bit step.
+            self.assertLessEqual(int(np.abs(c.astype(int) - py.astype(int)).max()), 1, f"samples {variant} {kw}")
+
+    def test_errors_match_the_reference(self):
+        icc = simulate_scan.scanner_icc()
+        blank = np.full((600, 800, 3), 60000, np.uint16)
+        with self.assertRaises(selphy_core.ChartError) as caught:
+            selphy_core.core_find_marks(blank, icc, self.aspect)
+        self.assertEqual(caught.exception.status, 9)
+
+
+class ReferenceTests(unittest.TestCase):
+    """The bundled ColorChecker reference editions."""
+
+    def test_editions_are_complete_and_consistent(self):
+        import json
+        folder = Path(__file__).resolve().parents[1] / "references"
+        data = json.loads((folder / "colour_targets.json").read_text())
+        ids = {s["id"] for s in data["sets"]}
+        self.assertEqual(ids, {"classic-before-2014", "classic-after-2014", "classic-2005", "classic-1976",
+                               "classic-babelcolor", "sg-before-2014", "sg-after-2014"})
+        for s in data["sets"]:
+            values = check_scanner.read_reference(folder / f"{s['id']}.csv")
+            self.assertEqual(len(values), 24 if s["target"] == "classic24" else 140)
+            np.testing.assert_allclose(values, [p["lab"] for p in s["patches"]])
+        before = check_scanner.read_reference(folder / "classic-before-2014.csv")
+        # Published note: rounded, the 2005 data match the before-November-2014 values.
+        self.assertLess(selphy_core.delta_e2000(before, check_scanner.read_reference(folder / "classic-2005.csv")).max(), 0.1)
+        self.assertEqual(Path(check_scanner.DEFAULT_REFERENCE).name, "classic-before-2014.csv")
+        self.assertAlmostEqual(before[0][0], 37.986)       # dark skin, X-Rite before November 2014
+        self.assertEqual(len(check_scanner.patch_centres(np.array([[0, 0], [130, 0], [0, 90], [130, 90]], float), 14, 10)), 140)
+
+
 class ScannerCheckTests(unittest.TestCase):
     def synthetic_colorchecker(self, folder, noise_offset=0.0):
         import tifffile

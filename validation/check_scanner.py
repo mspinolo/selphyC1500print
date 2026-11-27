@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Checks the scanner chain (scanner + VueScan settings + your ICC profile) on the physical
-ColorChecker Classic: the scan, converted with the profile, is compared with the reference Lab
-values of YOUR chart (D50), which you supply (datasheet / X-Rite software / BabelColor): they
-differ between chart production years, so none are bundled here.
+ColorChecker: the scan, converted with the profile, is compared with the reference Lab values of
+YOUR chart (D50). The values differ between production years: validation/references/ has the
+published editions (ColorChecker Classic before / from November 2014, 2005, 1976, BabelColor
+average; ColorChecker SG before / from November 2014), or give your own file (patch,name,L,a,b).
 
     python3 validation/check_scanner.py cc_scan.tif --corners "x,y x,y x,y x,y" \
-        --reference my_reference.csv --out results [--scanner-icc scanner.icc]
+        [--reference validation/references/classic-before-2014.csv] --out results [--scanner-icc scanner.icc]
 
---corners: pixel coordinates of the CENTRES of four patches, in this order: dark skin (top-left),
-bluish green (top-right), white (bottom-left), black (bottom-right), with the chart in its normal
-orientation (the row of greys at the bottom). Read them with any image viewer.
+--corners: pixel coordinates of the CENTRES of four patches, in this order. ColorChecker Classic
+(24 patches): dark skin (top-left), bluish green (top-right), white (bottom-left), black
+(bottom-right), with the row of greys at the bottom. ColorChecker SG (140 patches): A1, N1, A10,
+N10 as labelled on the chart. Read them with any image viewer.
 The result is an estimate of the measurement uncertainty on pigment patches, not on dye-sublimation
 prints: it bounds what differences the print measurements can resolve.
 """
@@ -24,10 +26,14 @@ import analyze_scan
 import selphy_core
 
 
+DEFAULT_REFERENCE = Path(__file__).parent / "references" / "classic-before-2014.csv"
+GRIDS = {24: (6, 4), 140: (14, 10)}          # patches -> (columns, rows), row-major order
+
+
 def read_reference(path):
     rows = list(csv.DictReader(open(path, newline="")))
-    if len(rows) != 24:
-        raise analyze_scan.ScanError(f"The reference file must have 24 rows, found {len(rows)}.")
+    if len(rows) not in GRIDS:
+        raise analyze_scan.ScanError(f"The reference file must have 24 (Classic) or 140 (SG) rows, found {len(rows)}.")
     values = []
     for row in rows:
         try:
@@ -44,14 +50,14 @@ def parse_corners(text):
     return np.array(pts)
 
 
-def patch_centres(corners):
+def patch_centres(corners, columns=6, rows=4):
     tl, tr, bl, br = corners
     centres = []
-    for r in range(4):
-        v = r / 3
+    for r in range(rows):
+        v = r / (rows - 1)
         left, right = tl + (bl - tl) * v, tr + (br - tr) * v
-        for c in range(6):
-            centres.append(left + (right - left) * (c / 5))
+        for c in range(columns):
+            centres.append(left + (right - left) * (c / (columns - 1)))
     return np.array(centres)
 
 
@@ -60,8 +66,9 @@ def check(scan_path, corners, reference, scanner_icc=None, radius_fraction=0.22)
     icc = scanner_icc or embedded
     if icc is None:
         raise analyze_scan.ScanError("No scanner profile: embed it in the TIFF or pass --scanner-icc.")
-    centres = patch_centres(corners)
-    pitch = np.linalg.norm(corners[1] - corners[0]) / 5
+    columns, rows = GRIDS[len(reference)]
+    centres = patch_centres(corners, columns, rows)
+    pitch = np.linalg.norm(corners[1] - corners[0]) / (columns - 1)
     radius = max(2, int(pitch * radius_fraction))
     samples = []
     for cx, cy in centres:
@@ -81,7 +88,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("scan")
     parser.add_argument("--corners", required=True)
-    parser.add_argument("--reference", required=True)
+    parser.add_argument("--reference", default=str(DEFAULT_REFERENCE))
     parser.add_argument("--scanner-icc")
     parser.add_argument("--out", default="results")
     args = parser.parse_args()

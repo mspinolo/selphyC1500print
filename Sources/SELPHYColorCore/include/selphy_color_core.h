@@ -33,7 +33,10 @@ typedef enum {
     SELPHY_ERR_PRINTER_UNSUPPORTED = 5, /* not an RGB output profile with Lab PCS, or intent tables missing */
     SELPHY_ERR_TRANSFORM = 6,           /* transform could not be built */
     SELPHY_ERR_MEMORY = 7,
-    SELPHY_ERR_DISPLAY_PROFILE = 8      /* display ICC data cannot be parsed or is not an RGB profile */
+    SELPHY_ERR_DISPLAY_PROFILE = 8,     /* display ICC data cannot be parsed or is not an RGB profile */
+    SELPHY_ERR_CHART_MARKS = 9,         /* fewer than four corner marks found in a chart scan */
+    SELPHY_ERR_CHART_ORIENTATION = 10,  /* the large (top-left) corner mark is not clearly identified */
+    SELPHY_ERR_CHART_SHAPE = 11         /* the corner marks do not form the chart's rectangle */
 } selphy_status;
 
 typedef struct {
@@ -162,6 +165,38 @@ selphy_status selphy_analyze_photo_lab(
     const uint8_t corrected_black_rgb8[3],
     float *de_map, float *intended_lab, float *predicted_lab,
     selphy_photo_stats *out_stats);
+
+/* ---- Scans of the validation chart (port of validation/analyze_scan.py) ---------------
+   The algorithms match the Python reference step by step, so the two give the same numbers on
+   the same scan (checked by validation/tests). Scan pixels are interleaved 16-bit RGB. */
+
+typedef struct { double x, y; } selphy_point;
+
+/* Homography (row-major 3x3, h[8] = 1) mapping the four src points onto the four dst points. */
+selphy_status selphy_homography4(const selphy_point src[4], const selphy_point dst[4], double h[9]);
+
+/* Applies a homography to a point. */
+selphy_point selphy_homography_apply(const double h[9], selphy_point p);
+
+/* Finds the four corner marks of the chart: dark (L* < 35 through the scanner profile; NULL
+   = sRGB), square, filled blobs on a reduced copy (block mean to about 1400 px); the four that
+   span the largest quadrilateral, ordered clockwise from the large top-left mark. Checks that the
+   large mark is 1.5 to 3.2 times the area of the others and that the width/height ratio of the
+   marks is within 4% of chart_aspect (distance tl-tr / distance tl-bl on the chart).
+   out_marks: centres in scan pixels, order top-left, top-right, bottom-right, bottom-left. */
+selphy_status selphy_chart_find_marks(
+    const uint16_t *rgb16, size_t width, size_t height,
+    const uint8_t *scanner_icc, size_t scanner_icc_size,
+    double chart_aspect, selphy_point out_marks[4]);
+
+/* For each chart rectangle (x, y, w, h in chart pixels, four doubles per rectangle) samples a
+   grid x grid lattice over the central `inner` fraction, maps it to the scan with h_chart_to_scan,
+   rounds to the nearest pixel (ties to even), clamps to the scan and returns the per-channel
+   median (16-bit; the mean of the two middle values, truncated, for an even count). */
+selphy_status selphy_chart_sample(
+    const uint16_t *rgb16, size_t width, size_t height,
+    const double h_chart_to_scan[9], const double *rects, size_t rect_count,
+    double inner, unsigned grid, uint16_t *out_rgb16);
 
 const char *selphy_status_message(selphy_status status);
 

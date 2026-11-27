@@ -39,6 +39,9 @@ const char *selphy_status_message(selphy_status status) {
         case SELPHY_ERR_TRANSFORM: return "colour transform could not be created";
         case SELPHY_ERR_MEMORY: return "out of memory";
         case SELPHY_ERR_DISPLAY_PROFILE: return "display ICC profile cannot be read or is not an RGB profile";
+        case SELPHY_ERR_CHART_MARKS: return "fewer than 4 corner marks found: check that the whole print is in the scan";
+        case SELPHY_ERR_CHART_ORIENTATION: return "the large corner mark is not clearly identified";
+        case SELPHY_ERR_CHART_SHAPE: return "the corner marks do not form the expected rectangle";
     }
     return "unknown status";
 }
