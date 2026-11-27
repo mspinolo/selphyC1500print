@@ -226,7 +226,7 @@ final class ValidationModel: ObservableObject {
         if data.visual.isEmpty { data.visual = PhotoRole.allCases.map { VisualVerdict(photoRole: $0.rawValue) } }
     }
 
-    static var defaultStoreURL: URL? {
+    nonisolated static var defaultStoreURL: URL? {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
         let folder = base.appendingPathComponent("SELPHY CP1500 Print", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

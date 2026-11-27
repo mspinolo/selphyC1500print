@@ -189,6 +189,41 @@ final class FullScreenTests: XCTestCase {
         XCTAssertEqual(full.stats.meanDeltaE, reduced.stats.meanDeltaE, accuracy: 0.3)
     }
 
+    func testFullResolutionLayersArriveInTheOrderAsked() throws {
+        guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
+            throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run real-profile tests.")
+        }
+        let profile = try Data(contentsOf: URL(fileURLWithPath: path))
+        let url = try writeImage(width: 2400, height: 1600)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let session = PreviewSession(corrections: 2, transforms: 2, renders: 2)
+        let options = PreviewService.Options(intent: .perceptual, blackPointCompensation: false)
+        var delivered: [PreviewSession.FullLayer] = []
+        try session.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options,
+                                         order: [.original, .corrected, .uncorrected]) { layer, image in
+            delivered.append(layer)
+            XCTAssertEqual(image.width, 2400)
+            XCTAssertEqual(image.height, 1600)
+        }
+        XCTAssertEqual(delivered, [.original, .corrected, .uncorrected])
+        XCTAssertEqual(session.counters.corrections, 1, "one correction stage for both rendered layers")
+        // Asked again: from the cache, nothing recomputed.
+        delivered = []
+        try session.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options,
+                                         order: [.uncorrected, .corrected]) { layer, _ in delivered.append(layer) }
+        XCTAssertEqual(delivered, [.uncorrected, .corrected])
+        XCTAssertEqual(session.counters.corrections, 1)
+        // Only the original: no correction needed at all.
+        let fresh = PreviewSession()
+        try fresh.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options, order: [.original]) { _, _ in }
+        XCTAssertEqual(fresh.counters.corrections, 0)
+        // Cancelled before starting: nothing delivered.
+        var none = 0
+        try PreviewSession().fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options,
+                                                  order: [.corrected], isCancelled: { true }) { _, _ in none += 1 }
+        XCTAssertEqual(none, 0)
+    }
+
     func testFullResolutionTimingOf24Megapixels() throws {
         guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
             throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run real-profile tests.")

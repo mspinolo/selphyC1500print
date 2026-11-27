@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 import CryptoKit
 
 /// A content digest for cache keys. `Data.hashValue` is not enough: it only looks at the length
@@ -82,6 +83,16 @@ final class PreviewSession: @unchecked Sendable {
         let displayName: String
     }
 
+    private struct LayerKey: Hashable {
+        let render: RenderKey
+        let layer: FullLayer
+    }
+
+    /// A view of the full-screen window, computed on its own (see `fullResolutionLayers`).
+    enum FullLayer: Hashable, Sendable {
+        case original, uncorrected, corrected
+    }
+
     private struct RenderStage {
         let uncorrected: CGImage
         let corrected: CGImage
@@ -116,6 +127,8 @@ final class PreviewSession: @unchecked Sendable {
     private var corrections: LRU<CorrectionKey, CorrectionStage>
     private var transforms: LRU<TransformKey, TransformStage>
     private var renders: LRU<RenderKey, RenderStage>
+    /// Single full-resolution renderings of the full-screen view.
+    private var layers: LRU<LayerKey, CGImage>
     private var _counters = Counters()
     private var _timings: [String: Double] = [:]
 
@@ -132,6 +145,7 @@ final class PreviewSession: @unchecked Sendable {
         self.corrections = LRU(capacity: corrections)
         self.transforms = LRU(capacity: transforms)
         self.renders = LRU(capacity: renders)
+        self.layers = LRU(capacity: max(2, renders * 2))
     }
 
     /// Drops everything (e.g. when the printer profile is replaced and memory should be freed).
@@ -140,6 +154,7 @@ final class PreviewSession: @unchecked Sendable {
             corrections.removeAll()
             transforms.removeAll()
             renders.removeAll()
+            layers.removeAll()
         }
     }
 
@@ -274,6 +289,109 @@ final class PreviewSession: @unchecked Sendable {
         }
     }
 
+    /// The full-resolution layers of the full-screen view, in the order asked (the one on screen
+    /// first), each delivered as soon as it is ready. The original needs no correction and comes
+    /// straight from the file; the others share the correction stage and render one at a time.
+    func fullResolutionLayers(
+        sourceURL: URL, printerICC: Data, display: PreviewService.Display?, options: PreviewService.Options,
+        order: [FullLayer], isCancelled: () -> Bool = { false }, deliver: (FullLayer, CGImage) -> Void
+    ) throws {
+        let hasAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer { if hasAccess { sourceURL.stopAccessingSecurityScopedResource() } }
+        var options = options
+        options.maxDimension = Int.max
+        let modified = (try? FileManager.default.attributesOfItem(atPath: sourceURL.path))?[.modificationDate] as? Date
+        let printerHash = ContentDigest.of(printerICC)
+        let correctionKey = CorrectionKey(
+            path: sourceURL.path, modified: modified, intent: options.intent,
+            blackPointCompensation: options.blackPointCompensation, maxDimension: options.maxDimension, printerProfile: printerHash)
+        let transformKey = TransformKey(
+            printerProfile: printerHash, displayProfile: display.map { ContentDigest.of($0.iccData) },
+            simulatePaperWhite: options.simulatePaperWhite, blackPointCompensation: options.previewBlackPointCompensation)
+        let renderKey = RenderKey(correction: correctionKey, transform: transformKey)
+
+        var correction: CorrectionStage?
+        var transform: TransformStage?
+        for layer in order {
+            if isCancelled() { return }
+            let key = LayerKey(render: renderKey, layer: layer)
+            if let cached = locked({ layers.value(for: key) }) {
+                deliver(layer, cached)
+                continue
+            }
+            let image: CGImage
+            if layer == .original, let original = Self.originalImage(url: sourceURL, maxDimension: options.maxDimension) {
+                image = original
+            } else {
+                if correction == nil {
+                    if let cached = locked({ corrections.value(for: correctionKey) }) {
+                        correction = cached
+                    } else {
+                        let made = try timed("correction") { try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options) }
+                        locked {
+                            _counters.corrections += 1
+                            corrections.insert(made, for: correctionKey)
+                        }
+                        correction = made
+                    }
+                }
+                if transform == nil, layer != .original {
+                    if let cached = locked({ transforms.value(for: transformKey) }) {
+                        transform = cached
+                    } else {
+                        let made = try timed("transform") { try computeTransform(printerICC: printerICC, display: display, options: options) }
+                        locked { transforms.insert(made, for: transformKey) }
+                        transform = made
+                    }
+                }
+                guard let correction else { continue }
+                if isCancelled() { return }
+                switch layer {
+                case .original:
+                    image = correction.original
+                case .uncorrected, .corrected:
+                    guard let transform else { continue }
+                    let device = layer == .corrected ? correction.correctedDevice : correction.sRGBDevice
+                    let rendered = timed("render") {
+                        transform.transform.render(rgbx: device, width: correction.width, height: correction.height, countOutOfGamut: false)
+                    }
+                    image = try ColorCorrectionService.makeImage(
+                        rgbx: rendered.pixels, width: correction.width, height: correction.height, colorSpace: transform.imageSpace)
+                }
+            }
+            locked { layers.insert(image, for: key) }
+            deliver(layer, image)
+        }
+    }
+
+    /// The photo as macOS shows it (EXIF orientation applied, its own colour space), at most
+    /// `maxDimension` pixels on the long side. Transparent areas are put on white, as in print.
+    static func originalImage(url: URL, maxDimension: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: min(max(width, height), maxDimension),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast:
+            return image
+        default:
+            guard let space = image.colorSpace, space.model == .rgb,
+                  let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return image }
+            context.setFillColor(CGColor(gray: 1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return context.makeImage() ?? image
+        }
+    }
+
     // MARK: - Stages
 
     /// A decoded, reduced photo and its uncorrected device values.
@@ -354,7 +472,10 @@ final class PreviewSession: @unchecked Sendable {
         return CorrectionStage(
             width: decoded.width, height: decoded.height,
             correctedDevice: corrected.correctedDevice, sRGBDevice: decoded.sRGBDevice,
-            original: try ColorCorrectionService.makeImage(rgbx: decoded.sRGBDevice, width: decoded.width, height: decoded.height, colorSpace: sRGB),
+            // The file as the system shows it, in its own colour space (a wide-gamut source keeps
+            // its colours); the sRGB numbers only if ImageIO cannot make it.
+            original: Self.originalImage(url: sourceURL, maxDimension: options.maxDimension)
+                ?? (try ColorCorrectionService.makeImage(rgbx: decoded.sRGBDevice, width: decoded.width, height: decoded.height, colorSpace: sRGB)),
             analysis: analysis,
             heatMap: try PreviewService.makeHeatMap(deltaE: analysis.deltaEMap, width: analysis.width, height: analysis.height),
             sourceDescription: PreviewService.describe(decoded.loaded),

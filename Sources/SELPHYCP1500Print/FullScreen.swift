@@ -74,8 +74,10 @@ final class FullScreenModel: ObservableObject {
     @Published var divider = 0.5
     @Published private(set) var hudVisible = true
     @Published private(set) var hudEnabled = true
+    /// The reduced preview, shown at once.
     @Published private(set) var preview: PreviewService.Preview?
-    @Published private(set) var isFullResolution = false
+    /// Full-resolution layers, arriving one by one (the one on screen first).
+    @Published private(set) var fullLayers: [PreviewSession.FullLayer: CGImage] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     /// Full pixel size of the photo (oriented): the reduced preview shown first is drawn at this size.
@@ -108,6 +110,30 @@ final class FullScreenModel: ObservableObject {
     }
 
     var currentPhoto: URL? { photos.indices.contains(index) ? photos[index] : nil }
+
+    /// The layers the current view shows.
+    var neededLayers: [PreviewSession.FullLayer] {
+        switch mode {
+        case .original: [.original]
+        case .uncorrected: [.uncorrected]
+        case .corrected: [.corrected]
+        case .compare: [.corrected, .uncorrected]
+        }
+    }
+
+    /// The full-resolution layer when ready, else the reduced preview's.
+    func image(_ layer: PreviewSession.FullLayer) -> CGImage? {
+        if let full = fullLayers[layer] { return full }
+        guard let preview else { return nil }
+        switch layer {
+        case .original: return preview.original
+        case .uncorrected: return preview.uncorrected
+        case .corrected: return preview.corrected
+        }
+    }
+
+    var hasImage: Bool { neededLayers.allSatisfy { image($0) != nil } }
+    var isFullResolution: Bool { neededLayers.allSatisfy { fullLayers[$0] != nil } }
 
     // MARK: Geometry
 
@@ -240,7 +266,7 @@ final class FullScreenModel: ObservableObject {
             parts.append(errorMessage)
         } else if isFullResolution {
             parts.append(trf("%d × %d px, full resolution", Int(imageSize.width), Int(imageSize.height)))
-        } else if isLoading {
+        } else if isLoading || preview != nil {
             parts.append(tr("Computing the full resolution…"))
         }
         return parts.joined(separator: "  ·  ")
@@ -259,6 +285,7 @@ final class FullScreenModel: ObservableObject {
     }
 
     func stop() {
+        cancelFlag?.set()
         loadTask?.cancel()
         hudTask?.cancel()
         fullSession.removeAll()
@@ -274,13 +301,14 @@ final class FullScreenModel: ObservableObject {
     }
 
     /// Shows the reduced preview at once (usually already computed by the preview panel), then
-    /// replaces it with the full-resolution rendering.
+    /// the full-resolution layers, the one on screen first.
     func load() {
+        cancelFlag?.set()
         loadTask?.cancel()
         guard let url = currentPhoto else { return }
         if let selection, selection.selected != url { selection.selected = url }
         preview = nil
-        isFullResolution = false
+        fullLayers = [:]
         errorMessage = nil
         zoom = nil
         offset = .zero
@@ -299,9 +327,9 @@ final class FullScreenModel: ObservableObject {
         var options = PreviewService.Options(intent: settings.renderingIntent, blackPointCompensation: settings.blackPointCompensation)
         options.simulatePaperWhite = settings.simulatePaperWhite
         options.previewBlackPointCompensation = settings.previewMonitorBlack
-        var fullOptions = options
-        fullOptions.maxDimension = Int.max
         let fullSession = fullSession
+        let loadID = UUID()
+        currentLoad = loadID
 
         loadTask = Task { [weak self] in
             let quick = try? await Task.detached(priority: .userInitiated) {
@@ -312,22 +340,49 @@ final class FullScreenModel: ObservableObject {
             // A short pause: browsing quickly does not start a full-resolution computation per photo.
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
+            let order = self.layerOrder()
+            let cancelled = CancellationFlag()
+            self.cancelFlag = cancelled
             do {
-                let full = try await Task.detached(priority: .userInitiated) {
-                    try fullSession.makePreview(sourceURL: url, printerICC: printerICC, display: display, options: fullOptions)
+                try await Task.detached(priority: .userInitiated) {
+                    try fullSession.fullResolutionLayers(
+                        sourceURL: url, printerICC: printerICC, display: display, options: options, order: order,
+                        isCancelled: { cancelled.isSet },
+                        deliver: { layer, image in
+                            Task { @MainActor [weak self] in
+                                guard let self, self.currentLoad == loadID else { return }
+                                self.fullLayers[layer] = image
+                                self.imageSize = CGSize(width: image.width, height: image.height)
+                                self.offset = self.clamped(self.offset)
+                            }
+                        })
                 }.value
-                guard !Task.isCancelled else { return }
-                self.preview = full
-                self.imageSize = CGSize(width: full.original.width, height: full.original.height)
-                self.isFullResolution = true
-                self.offset = self.clamped(self.offset)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.errorMessage = trf("Full resolution unavailable: %@", error.localizedDescription)
             }
+            guard self.currentLoad == loadID else { return }
             self.isLoading = false
         }
     }
+
+    private var currentLoad: UUID?
+    private var cancelFlag: CancellationFlag?
+
+    /// The layers on screen first, then the others.
+    private func layerOrder() -> [PreviewSession.FullLayer] {
+        // The original is cheap (no correction): right after the layers on screen.
+        let all: [PreviewSession.FullLayer] = [.original, .corrected, .uncorrected]
+        return neededLayers + all.filter { !neededLayers.contains($0) }
+    }
+}
+
+/// A flag a background computation checks between steps.
+final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set() { lock.lock(); value = true; lock.unlock() }
 }
 
 /// A borderless window that can take the keyboard.
@@ -462,26 +517,26 @@ struct FullScreenView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let preview = model.preview {
+        if model.hasImage {
             switch model.mode {
             case .original:
-                pane { image(preview.original) }
+                pane { layer(.original) }
             case .uncorrected:
-                pane { image(preview.uncorrected) }
+                pane { layer(.uncorrected) }
             case .corrected:
-                pane { image(preview.corrected) }
+                pane { layer(.corrected) }
             case .compare:
                 if model.sideBySide {
                     HStack(spacing: 0) {
-                        pane { image(preview.uncorrected) }
+                        pane { layer(.uncorrected) }
                             .overlay(alignment: .top) { caption(tr("Without correction")) }
-                        pane { image(preview.corrected) }
+                        pane { layer(.corrected) }
                             .overlay(alignment: .top) { caption(tr("With correction")) }
                     }
-                } else {
+                } else if let before = model.image(.uncorrected), let after = model.image(.corrected) {
                     // Dragging moves the divider here; scrolling moves a zoomed photo.
                     pane(pans: false) {
-                        ComparisonSlider(before: preview.uncorrected, after: preview.corrected, fraction: $model.divider)
+                        ComparisonSlider(before: before, after: after, fraction: $model.divider)
                     }
                 }
             }
@@ -493,6 +548,11 @@ struct FullScreenView: View {
         } else {
             ProgressView().controlSize(.large)
         }
+    }
+
+    @ViewBuilder
+    private func layer(_ layer: PreviewSession.FullLayer) -> some View {
+        if let image = model.image(layer) { self.image(image) }
     }
 
     private func image(_ image: CGImage) -> some View {
