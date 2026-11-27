@@ -42,9 +42,28 @@ struct SELPHYCP1500PrintApp: App {
         }
         .defaultSize(width: 920, height: 760)
         .windowResizability(.contentMinSize)
+        // Advanced > Print validation assistant: the physical test, step by step (M3.3).
+        Window(tr("Print validation assistant"), id: ValidationAssistantView.windowID) {
+            ValidationAssistantView(settings: settings)
+                .environmentObject(settings)
+        }
+        .defaultSize(width: 1040, height: 760)
+        .windowResizability(.contentMinSize)
+        .commands { AdvancedCommands() }
         Settings {
             SettingsView()
                 .environmentObject(settings)
+        }
+    }
+}
+
+/// The Advanced menu.
+struct AdvancedCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandMenu(tr("Advanced")) {
+            Button(tr("Print validation assistant…")) { openWindow(id: ValidationAssistantView.windowID) }
         }
     }
 }
