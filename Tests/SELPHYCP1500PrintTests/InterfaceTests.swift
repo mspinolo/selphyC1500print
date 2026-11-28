@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Observation
 import SwiftUI
 import XCTest
@@ -38,6 +39,56 @@ final class HostedView {
     }
 
     func close() { window.close() }
+
+    /// Whether SwiftUI exposes its accessibility tree in this process (it does not when no
+    /// assistive client has asked for it, as on a CI runner without accessibility permission).
+    static let accessibilityAvailable: Bool = {
+        let probe = HostedView(Button("Accessibility probe") {}.padding(), size: CGSize(width: 300, height: 120))
+        defer { probe.close() }
+        return probe.waitUntil(timeout: 2) { probe.control("Accessibility probe") != nil }
+    }()
+
+    /// The window as drawn (what a person sees), for comparisons before and after a change.
+    func image() -> NSBitmapImageRep? {
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        return rep
+    }
+
+    /// Share of pixels that differ visibly between two drawings of the same window.
+    static func difference(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Double {
+        guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh,
+              let pa = a.bitmapData, let pb = b.bitmapData else { return 1 }
+        var differing = 0
+        let step = 2
+        var total = 0
+        for y in stride(from: 0, to: a.pixelsHigh, by: step) {
+            for x in stride(from: 0, to: a.pixelsWide, by: step) {
+                total += 1
+                let ia = y * a.bytesPerRow + x * a.bitsPerPixel / 8
+                let ib = y * b.bytesPerRow + x * b.bitsPerPixel / 8
+                var delta = 0
+                for c in 0..<3 { delta = max(delta, abs(Int(pa[ia + c]) - Int(pb[ib + c]))) }
+                if delta > 24 { differing += 1 }
+            }
+        }
+        return Double(differing) / Double(max(1, total))
+    }
+
+    /// Waits until the drawing differs from `reference` by more than `threshold` (or, with
+    /// `same`, until it matches it again); returns the last difference.
+    @discardableResult
+    func waitForDrawing(comparedWith reference: NSBitmapImageRep, changed: Bool, threshold: Double = 0.002,
+                        timeout: TimeInterval = 5) -> Double {
+        var last = changed ? 0 : 1.0
+        _ = waitUntil(timeout: timeout) {
+            guard let now = image() else { return false }
+            last = Self.difference(reference, now)
+            return changed ? last > threshold : last <= threshold
+        }
+        return last
+    }
 
     func pump(_ seconds: TimeInterval = 0.2) {
         let end = Date().addingTimeInterval(seconds)
@@ -175,55 +226,17 @@ final class HostedView {
 /// tests this checks the whole path control -> state -> view after the move to Observation.
 @MainActor
 final class InterfaceTests: XCTestCase {
-    private var defaultsSuite: String?
-
-    override func tearDown() {
-        if let defaultsSuite { UserDefaults().removePersistentDomain(forName: defaultsSuite) }
-        Localizer.shared.language = .english
-        super.tearDown()
-    }
-
-    private func makeSettings(profile: Bool) throws -> AppSettings {
-        let suite = "selphy-interface-\(UUID().uuidString)"
-        defaultsSuite = suite
-        let settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
-        if profile { try settings.chooseProfile(at: try profileURL()) }
-        return settings
-    }
-
-    private func profileURL() throws -> URL {
-        guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"],
-              FileManager.default.fileExists(atPath: path) else {
-            throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run the interface tests with the printer profile.")
-        }
-        return URL(fileURLWithPath: path)
-    }
-
-    private func makePhotos(_ count: Int) throws -> [URL] {
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("selphy-interface-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
-        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
-        return try (0..<count).map { index in
-            let context = try XCTUnwrap(CGContext(data: nil, width: 300, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
-                                                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-            context.setFillColor(NSColor(hue: 0.2 * CGFloat(index), saturation: 0.6, brightness: 0.8, alpha: 1).cgColor)
-            context.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
-            context.setFillColor(NSColor(white: 0.2, alpha: 1).cgColor)
-            context.fill(CGRect(x: 0, y: 0, width: 150, height: 100))
-            let url = folder.appendingPathComponent("Photo-\(index + 1).png")
-            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
-            CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
-            XCTAssertTrue(CGImageDestinationFinalize(destination))
-            return url
+    override func setUp() async throws {
+        try await super.setUp()
+        guard HostedView.accessibilityAvailable else {
+            throw XCTSkip("The SwiftUI accessibility tree is not available in this process (no accessibility client); see InterfaceDrawingTests.")
         }
     }
 
     // MARK: Main window
 
     func testTheAccessibilityTreeIsReadable() throws {
-        let settings = try makeSettings(profile: false)
+        let settings = try interfaceSettings(profile: false)
         let window = HostedView(ContentView().environment(settings).environment(PhotoSelection()))
         defer { window.close() }
         print("Interface check tree (main window, empty):\n\(window.dump(limit: 120))")
@@ -231,7 +244,7 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testGenerateIsDisabledWithTheReasonUntilProfileAndPhotosAreThere() throws {
-        let settings = try makeSettings(profile: false)
+        let settings = try interfaceSettings(profile: false)
         let selection = PhotoSelection()
         let empty = HostedView(ContentView().environment(settings).environment(selection))
         defer { empty.close() }
@@ -241,13 +254,13 @@ final class InterfaceTests: XCTestCase {
         XCTAssertTrue(empty.shows(tr("Drop photos here")))
 
         // Choosing the profile (in Settings) updates the open window: next reason, no warning.
-        try settings.chooseProfile(at: try profileURL())
+        try settings.chooseProfile(at: try interfaceProfileURL())
         XCTAssertTrue(empty.waitUntil { empty.shows(tr("Add photos to the list first.")) }, empty.dump())
         XCTAssertFalse(empty.shows(tr("Open Settings…")))
         XCTAssertEqual(empty.control(tr("Generate corrected copies"))?.enabled, false)
 
         empty.close()
-        let photos = try makePhotos(2)
+        let photos = try interfacePhotos(2)
         let shared = PhotoSelection()
         let ready = HostedView(ContentView(initialPhotos: photos).environment(settings).environment(shared))
         defer { ready.close() }
@@ -259,9 +272,9 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testGeneratingTheCopiesShowsThemAndThePrintActionsAndClearingRemovesThem() throws {
-        let settings = try makeSettings(profile: true)
+        let settings = try interfaceSettings(profile: true)
         let selection = PhotoSelection()
-        let photos = try makePhotos(2)
+        let photos = try interfacePhotos(2)
         let window = HostedView(ContentView(initialPhotos: photos).environment(settings).environment(selection))
         defer { window.close() }
         XCTAssertTrue(window.waitUntil { window.control(tr("Generate corrected copies"))?.enabled == true }, window.dump())
@@ -282,8 +295,8 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testTheMenusOfTheMainWindowAndTheSettingsStayInStep() throws {
-        let settings = try makeSettings(profile: true)
-        let photos = try makePhotos(1)
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(1)
         let window = HostedView(ContentView(initialPhotos: photos).environment(settings).environment(PhotoSelection()))
         defer { window.close() }
         let saturation = RenderingIntent.saturation.title
@@ -302,8 +315,8 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testThePreviewViewMenuSwitchesTheView() throws {
-        let settings = try makeSettings(profile: true)
-        let photos = try makePhotos(1)
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(1)
         let window = HostedView(ContentView(initialPhotos: photos).environment(settings).environment(PhotoSelection()))
         defer { window.close() }
         let compareHint = tr("Left: predicted print without correction. Right: with correction. Drag to move the divider.")
@@ -315,7 +328,7 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testTheLanguageChangesTheOpenWindowsAtOnce() throws {
-        let settings = try makeSettings(profile: false)
+        let settings = try interfaceSettings(profile: false)
         let window = HostedView(ContentView().environment(settings).environment(PhotoSelection()))
         defer { window.close() }
         let english = tr("Generate corrected copies")
@@ -330,7 +343,7 @@ final class InterfaceTests: XCTestCase {
     // MARK: Settings window
 
     func testTheSettingsControlsChangeTheSettings() throws {
-        let settings = try makeSettings(profile: true)
+        let settings = try interfaceSettings(profile: true)
         settings.renderingIntent = .relativeColorimetric   // BPC is a free choice only here
         let window = HostedView(SettingsView().environment(settings), size: CGSize(width: 540, height: 900))
         defer { window.close() }
@@ -363,7 +376,7 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testBlackPointCompensationIsLockedWhereTheProfileForcesIt() throws {
-        let settings = try makeSettings(profile: true)
+        let settings = try interfaceSettings(profile: true)
         settings.renderingIntent = .relativeColorimetric
         let window = HostedView(SettingsView().environment(settings), size: CGSize(width: 540, height: 900))
         defer { window.close() }
@@ -377,8 +390,8 @@ final class InterfaceTests: XCTestCase {
     // MARK: Statistics window
 
     func testTheStatisticsListThePhotosAndFollowTheSelection() throws {
-        let settings = try makeSettings(profile: true)
-        let photos = try makePhotos(3)
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(3)
         let selection = PhotoSelection()
         selection.photos = photos
         selection.selected = photos[0]
@@ -412,7 +425,7 @@ final class InterfaceTests: XCTestCase {
     }
 
     func testTheStatisticsWithoutPhotosSayWhatToDo() throws {
-        let settings = try makeSettings(profile: true)
+        let settings = try interfaceSettings(profile: true)
         let window = HostedView(StatisticsView().environment(settings).environment(PhotoSelection()), size: CGSize(width: 920, height: 760))
         defer { window.close() }
         XCTAssertTrue(window.waitUntil { window.shows(tr("Add photos in the main window to see their statistics.")) }, window.dump())
@@ -421,8 +434,8 @@ final class InterfaceTests: XCTestCase {
     // MARK: Full-screen view
 
     func testTheFullScreenIndicationsFollowTheCommandsAndTheSettings() throws {
-        let settings = try makeSettings(profile: true)
-        let photos = try makePhotos(2)
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(2)
         let model = FullScreenModel(photos: photos, current: photos[0], settings: settings, selection: nil)
         model.autoHidesHUD = false
         model.backingScale = 1
@@ -445,7 +458,7 @@ final class InterfaceTests: XCTestCase {
     // MARK: Validation assistant
 
     func testTheAssistantStepsThroughWithBackAndNext() throws {
-        let settings = try makeSettings(profile: false)
+        let settings = try interfaceSettings(profile: false)
         let model = ValidationModel(settings: settings, storeURL: nil)
         let window = HostedView(ValidationAssistantView(model: model).environment(settings), size: CGSize(width: 1040, height: 760))
         defer { window.close() }
@@ -459,12 +472,12 @@ final class InterfaceTests: XCTestCase {
         XCTAssertTrue(window.waitUntil { window.control(tr("Back")) == nil }, window.dump())
 
         // The profile chosen in Settings reaches the open assistant.
-        try settings.chooseProfile(at: try profileURL())
+        try settings.chooseProfile(at: try interfaceProfileURL())
         XCTAssertTrue(window.waitUntil { window.shows(trf("Printer profile: %@", settings.profileDisplayName)) }, window.dump())
     }
 
     func testTheAssistantModeMenuChangesTheSession() throws {
-        let settings = try makeSettings(profile: false)
+        let settings = try interfaceSettings(profile: false)
         let model = ValidationModel(settings: settings, storeURL: nil)
         let window = HostedView(ValidationAssistantView(model: model).environment(settings), size: CGSize(width: 1040, height: 760))
         defer { window.close() }
@@ -621,5 +634,49 @@ final class ObservationTests: XCTestCase {
         XCTAssertTrue(invalidates({ _ = model.data.mode }, { model.data.mode = other }))
         XCTAssertTrue(invalidates({ _ = model.message }, { model.message = "x" }))
         XCTAssertEqual(ValidationModel(settings: settings, storeURL: store).data.mode, other, "saved by didSet")
+    }
+}
+
+/// Settings, profile and photos for the interface tests (each test gets its own defaults).
+@MainActor
+extension XCTestCase {
+    func interfaceSettings(profile: Bool) throws -> AppSettings {
+        let suite = "selphy-interface-\(UUID().uuidString)"
+        addTeardownBlock {
+            UserDefaults().removePersistentDomain(forName: suite)
+            Localizer.shared.language = .english
+        }
+        let settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        if profile { try settings.chooseProfile(at: try interfaceProfileURL()) }
+        return settings
+    }
+
+    func interfaceProfileURL() throws -> URL {
+        guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"],
+              FileManager.default.fileExists(atPath: path) else {
+            throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to run the interface tests with the printer profile.")
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    func interfacePhotos(_ count: Int) throws -> [URL] {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selphy-interface-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        return try (0..<count).map { index in
+            let context = try XCTUnwrap(CGContext(data: nil, width: 300, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+                                                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(NSColor(hue: 0.2 * CGFloat(index), saturation: 0.6, brightness: 0.8, alpha: 1).cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
+            context.setFillColor(NSColor(white: 0.2, alpha: 1).cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 150, height: 100))
+            let url = folder.appendingPathComponent("Photo-\(index + 1).png")
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            return url
+        }
     }
 }

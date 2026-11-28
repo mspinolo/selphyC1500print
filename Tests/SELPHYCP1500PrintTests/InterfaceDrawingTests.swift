@@ -1,0 +1,170 @@
+import AppKit
+import ApplicationServices
+import SwiftUI
+import XCTest
+@testable import SELPHYCP1500Print
+
+/// The windows, checked by what they draw: each one is opened in a real window, something is
+/// changed the way the rest of the app changes it (Settings, another window, the model), and the
+/// drawing must change accordingly and come back when the change is undone. These need no
+/// accessibility permission, so they always run; `InterfaceTests` adds the control-by-control
+/// checks where the accessibility tree is available.
+@MainActor
+final class InterfaceDrawingTests: XCTestCase {
+    private func reference(_ window: HostedView, settle: TimeInterval = 1.5) throws -> NSBitmapImageRep {
+        window.pump(settle)
+        return try XCTUnwrap(window.image())
+    }
+
+    func testTheOpenWindowsFollowTheLanguage() throws {
+        let settings = try interfaceSettings(profile: true)
+        let windows: [(String, HostedView)] = [
+            ("main", HostedView(ContentView().environment(settings).environment(PhotoSelection()))),
+            ("settings", HostedView(SettingsView().environment(settings), size: CGSize(width: 540, height: 680))),
+            ("assistant", HostedView(ValidationAssistantView(model: ValidationModel(settings: settings, storeURL: nil)).environment(settings),
+                                     size: CGSize(width: 1040, height: 760))),
+        ]
+        defer { windows.forEach { $0.1.close() } }
+        let english = try windows.map { try reference($0.1) }
+        settings.language = .italian
+        for (index, (name, window)) in windows.enumerated() {
+            let difference = window.waitForDrawing(comparedWith: english[index], changed: true)
+            XCTAssertGreaterThan(difference, 0.002, "\(name): the window did not change language")
+        }
+        settings.language = .english
+        for (index, (name, window)) in windows.enumerated() {
+            let difference = window.waitForDrawing(comparedWith: english[index], changed: false)
+            XCTAssertLessThanOrEqual(difference, 0.002, "\(name): the window did not come back to English")
+        }
+    }
+
+    func testChoosingAndRemovingTheProfileUpdatesTheMainWindowAndTheAssistant() throws {
+        let settings = try interfaceSettings(profile: false)
+        let main = HostedView(ContentView().environment(settings).environment(PhotoSelection()))
+        let assistant = HostedView(ValidationAssistantView(model: ValidationModel(settings: settings, storeURL: nil)).environment(settings),
+                                   size: CGSize(width: 1040, height: 760))
+        defer {
+            main.close()
+            assistant.close()
+        }
+        let mainBefore = try reference(main)
+        let assistantBefore = try reference(assistant)
+        try settings.chooseProfile(at: try interfaceProfileURL())
+        XCTAssertGreaterThan(main.waitForDrawing(comparedWith: mainBefore, changed: true), 0.002, "the profile warning stayed")
+        XCTAssertGreaterThan(assistant.waitForDrawing(comparedWith: assistantBefore, changed: true), 0.002)
+        settings.clearProfile()
+        XCTAssertLessThanOrEqual(main.waitForDrawing(comparedWith: mainBefore, changed: false), 0.002, "the warning did not come back")
+        XCTAssertLessThanOrEqual(assistant.waitForDrawing(comparedWith: assistantBefore, changed: false), 0.002)
+    }
+
+    func testTheThemeRepaintsTheMainWindowWithTheDarktableGrey() throws {
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(1)
+        let window = HostedView(ContentView(initialPhotos: photos).environment(settings).environment(PhotoSelection()))
+        defer { window.close() }
+        let system = try reference(window, settle: 4)
+        settings.theme = .neutralGrey
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: system, changed: true, threshold: 0.2), 0.2,
+                             "most of the window should turn grey")
+        settings.theme = .system
+        XCTAssertLessThanOrEqual(window.waitForDrawing(comparedWith: system, changed: false, threshold: 0.01), 0.01)
+    }
+
+    func testPreviewOptionsChangedInTheSettingsRedrawThePreview() throws {
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(1)
+        let window = HostedView(ContentView(initialPhotos: photos).environment(settings).environment(PhotoSelection()))
+        defer { window.close() }
+        let before = try reference(window, settle: 6)
+        // The same options as in the preview's menu, changed from elsewhere (Settings, full screen).
+        settings.simulatePaperWhite = true
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: before, changed: true, timeout: 15), 0.002,
+                             "the preview did not follow 'Simulate paper white'")
+        settings.simulatePaperWhite = false
+        XCTAssertLessThanOrEqual(window.waitForDrawing(comparedWith: before, changed: false, timeout: 15), 0.002)
+    }
+
+    func testTheFullScreenIndicationsFollowTheModelAndTheSettings() throws {
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(2)
+        let model = FullScreenModel(photos: photos, current: photos[0], settings: settings, selection: nil)
+        model.autoHidesHUD = false
+        model.backingScale = 1
+        model.start()
+        let window = HostedView(FullScreenView(model: model).environment(settings), size: CGSize(width: 1280, height: 800))
+        defer { window.close() }
+        let compare = try reference(window, settle: 6)
+
+        model.handle(.mode(.original))
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: compare, changed: true, timeout: 10), 0.002)
+        model.handle(.mode(.compare))
+        XCTAssertLessThanOrEqual(window.waitForDrawing(comparedWith: compare, changed: false, timeout: 10), 0.002)
+
+        settings.renderingIntent = .saturation      // shown in the status line, owned by AppSettings
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: compare, changed: true, timeout: 10), 0.0005)
+        settings.renderingIntent = .perceptual
+
+        model.handle(.toggleHUD)
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: compare, changed: true, timeout: 10), 0.002, "the indications stayed")
+    }
+
+    func testTheStatisticsWindowFillsInAndFollowsTheSelection() throws {
+        let settings = try interfaceSettings(profile: true)
+        let photos = try interfacePhotos(3)
+        let selection = PhotoSelection()
+        let window = HostedView(StatisticsView().environment(settings).environment(selection), size: CGSize(width: 920, height: 760))
+        defer { window.close() }
+        let empty = try reference(window)
+        selection.photos = photos
+        selection.selected = photos[0]
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: empty, changed: true, threshold: 0.02, timeout: 30), 0.02,
+                             "the photos did not appear")
+        window.pump(8)
+        let first = try XCTUnwrap(window.image())
+        selection.selected = photos[2]
+        XCTAssertGreaterThan(window.waitForDrawing(comparedWith: first, changed: true, timeout: 20), 0.002,
+                             "the statistics did not follow the photo selected elsewhere")
+    }
+
+    /// Diagnostics only: what this process can see of its own accessibility tree.
+    func testAccessibilityProbe() throws {
+        let settings = try interfaceSettings(profile: false)
+        let window = HostedView(ContentView().environment(settings).environment(PhotoSelection()))
+        defer { window.close() }
+        print("Interface probe: trusted=\(AXIsProcessTrusted()) nodes=\(window.nodes().count) available=\(HostedView.accessibilityAvailable)")
+        var classes: [String] = []
+        func visit(_ view: NSView, depth: Int) {
+            classes.append(String(repeating: " ", count: depth) + String(describing: type(of: view)))
+            if depth < 8 { view.subviews.forEach { visit($0, depth: depth + 1) } }
+        }
+        visit(window.host, depth: 0)
+        print("Interface probe: views\n" + classes.prefix(60).joined(separator: "\n"))
+
+        // The accessibility API on this process, from another thread (the main thread answers).
+        final class Box: @unchecked Sendable {
+            let lock = NSLock()
+            var text = ""
+            var done = false
+        }
+        let box = Box()
+        let pid = getpid()
+        let thread = Thread {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 3)
+            let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            let enhanced = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            var windows: CFTypeRef?
+            let copy = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
+            let count = (windows as? [AnyObject])?.count ?? -1
+            box.lock.withLock {
+                box.text = "manual=\(manual.rawValue) enhanced=\(enhanced.rawValue) windows=\(copy.rawValue)/\(count)"
+                box.done = true
+            }
+        }
+        thread.start()
+        _ = window.waitUntil(timeout: 12) { box.lock.withLock { box.done } }
+        window.pump(1)
+        print("Interface probe: AX API \(box.lock.withLock { box.text }) nodes now=\(window.nodes().count)")
+        print("Interface probe: tree\n\(window.dump(limit: 40))")
+    }
+}
