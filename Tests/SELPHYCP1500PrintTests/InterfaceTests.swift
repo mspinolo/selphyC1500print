@@ -25,7 +25,7 @@ final class HostedView {
     let host: NSView
 
     init<V: View>(_ view: V, size: CGSize = CGSize(width: 980, height: 680)) {
-        _ = NSApplication.shared
+        Self.prepareApplication()
         let host = NSHostingView(rootView: view)
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.titled, .closable, .resizable],
@@ -46,12 +46,29 @@ final class HostedView {
         if let cachedAvailability { return cachedAvailability }
         let probe = HostedView(Button("Accessibility probe") {}.padding(), size: CGSize(width: 300, height: 120))
         defer { probe.close() }
-        let available = probe.waitUntil(timeout: 2) { probe.control("Accessibility probe") != nil }
+        var available = probe.waitUntil(timeout: 1) { probe.control("Accessibility probe") != nil }
+        if !available {
+            clientStatus = AccessibilityClient.connect(pumping: probe)
+            available = probe.waitUntil(timeout: 3) { probe.control("Accessibility probe") != nil }
+        }
+        print("Interface probe: client \(clientStatus) available=\(available)")
         cachedAvailability = available
         return available
     }
 
     private static var cachedAvailability: Bool?
+    static var clientStatus = "not needed"
+    private static var launched = false
+
+    /// A test process creates NSApplication but never finishes launching it, so the app has no
+    /// accessibility service; finishing the launch once gives it one, as in the real app.
+    static func prepareApplication() {
+        _ = NSApplication.shared
+        guard !launched else { return }
+        launched = true
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+    }
 
     /// The window as drawn (what a person sees), for comparisons before and after a change.
     func image() -> NSBitmapImageRep? {
@@ -223,6 +240,42 @@ final class HostedView {
         nodes().prefix(limit).map { node in
             String(repeating: " ", count: min(node.depth, 30)) + "\(node.role) \(node.texts)\(node.enabled ? "" : " [disabled]")"
         }.joined(separator: "\n")
+    }
+}
+
+/// Talks to this process through the system accessibility API, as VoiceOver would, so that
+/// SwiftUI builds its accessibility tree. Runs on another thread: the main thread answers.
+@MainActor
+enum AccessibilityClient {
+    private final class Box: @unchecked Sendable {
+        let lock = NSLock()
+        var text = ""
+        var done = false
+    }
+
+    static func connect(pumping window: HostedView) -> String {
+        let box = Box()
+        let pid = getpid()
+        let thread = Thread {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 3)
+            let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            var windows: CFTypeRef?
+            let copy = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
+            var described: [String] = []
+            for element in (windows as? [AXUIElement]) ?? [] {
+                var children: CFTypeRef?
+                AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children)
+                described.append("\((children as? [AnyObject])?.count ?? -1)")
+            }
+            box.lock.withLock {
+                box.text = "trusted=\(AXIsProcessTrusted()) manual=\(manual.rawValue) windows=\(copy.rawValue) children=\(described)"
+                box.done = true
+            }
+        }
+        thread.start()
+        _ = window.waitUntil(timeout: 12) { box.lock.withLock { box.done } }
+        return box.lock.withLock { box.text }
     }
 }
 

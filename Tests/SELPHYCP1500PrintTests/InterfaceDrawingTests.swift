@@ -129,42 +129,11 @@ final class InterfaceDrawingTests: XCTestCase {
     /// Diagnostics only: what this process can see of its own accessibility tree.
     func testAccessibilityProbe() throws {
         let settings = try interfaceSettings(profile: false)
+        let available = HostedView.accessibilityAvailable
         let window = HostedView(ContentView().environment(settings).environment(PhotoSelection()))
         defer { window.close() }
-        print("Interface probe: trusted=\(AXIsProcessTrusted()) nodes=\(window.nodes().count) available=\(HostedView.accessibilityAvailable)")
-        var classes: [String] = []
-        func visit(_ view: NSView, depth: Int) {
-            classes.append(String(repeating: " ", count: depth) + String(describing: type(of: view)))
-            if depth < 8 { view.subviews.forEach { visit($0, depth: depth + 1) } }
-        }
-        visit(window.host, depth: 0)
-        print("Interface probe: views\n" + classes.prefix(60).joined(separator: "\n"))
-
-        // The accessibility API on this process, from another thread (the main thread answers).
-        final class Box: @unchecked Sendable {
-            let lock = NSLock()
-            var text = ""
-            var done = false
-        }
-        let box = Box()
-        let pid = getpid()
-        let thread = Thread {
-            let app = AXUIElementCreateApplication(pid)
-            AXUIElementSetMessagingTimeout(app, 3)
-            let manual = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-            let enhanced = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-            var windows: CFTypeRef?
-            let copy = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
-            let count = (windows as? [AnyObject])?.count ?? -1
-            box.lock.withLock {
-                box.text = "manual=\(manual.rawValue) enhanced=\(enhanced.rawValue) windows=\(copy.rawValue)/\(count)"
-                box.done = true
-            }
-        }
-        thread.start()
-        _ = window.waitUntil(timeout: 12) { box.lock.withLock { box.done } }
         window.pump(1)
-        print("Interface probe: AX API \(box.lock.withLock { box.text }) nodes now=\(window.nodes().count)")
-        print("Interface probe: tree\n\(window.dump(limit: 40))")
+        print("Interface probe: available=\(available) client=\(HostedView.clientStatus) nodes=\(window.nodes().count)")
+        print("Interface probe: tree\n\(window.dump(limit: 80))")
     }
 }
