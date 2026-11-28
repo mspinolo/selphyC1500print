@@ -42,11 +42,16 @@ final class HostedView {
 
     /// Whether SwiftUI exposes its accessibility tree in this process (it does not when no
     /// assistive client has asked for it, as on a CI runner without accessibility permission).
-    static let accessibilityAvailable: Bool = {
+    static var accessibilityAvailable: Bool {
+        if let cachedAvailability { return cachedAvailability }
         let probe = HostedView(Button("Accessibility probe") {}.padding(), size: CGSize(width: 300, height: 120))
         defer { probe.close() }
-        return probe.waitUntil(timeout: 2) { probe.control("Accessibility probe") != nil }
-    }()
+        let available = probe.waitUntil(timeout: 2) { probe.control("Accessibility probe") != nil }
+        cachedAvailability = available
+        return available
+    }
+
+    private static var cachedAvailability: Bool?
 
     /// The window as drawn (what a person sees), for comparisons before and after a change.
     func image() -> NSBitmapImageRep? {
