@@ -88,7 +88,7 @@ of the questions the validation assistant answers.
 ## 6. Print validation assistant (Advanced menu)
 
 A guided version of [`PHYSICAL_VALIDATION.md`](PHYSICAL_VALIDATION.md), for anyone who wants to
-check the correction on their own printer. It remembers where you are between sessions.
+check the correction on their own printer. It remembers where you are between sessions; if the saved session ever cannot be read, it is kept aside (not overwritten) and the assistant says so.
 
 1. **Mode** — with a flatbed scanner (measured) or without (visual comparison).
 2. **Reference chart** — the edition of your physical ColorChecker: Classic made before November

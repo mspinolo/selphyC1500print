@@ -3,6 +3,35 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [0.0.9] - 2026-11-28
+Ninth pre-release. Not verified on physical prints.
+
+### Fixed
+- **The validation session could be lost without notice**: a session file that could not be read
+  (damaged, or written by a later version) was replaced by a new session at the first change, and
+  failed saves were silent. Now fields missing from an older file keep their defaults, a file that
+  cannot be read is kept aside under a dated name and reported, and a failed save is reported
+  until saving works again.
+- The validation assistant renews the references (bookmarks) of files and folders that were moved
+  or renamed, so that it keeps finding them.
+- VoiceOver: completed steps were announced as "Selected"; gate results, the best intent, a photo
+  that cannot be read and the full-screen close button now have labels; decorative icons are hidden.
+
+### Changed
+- Faster previews of photos with their own profile: the sRGB copy (the "without correction"
+  simulation) is made from the pixels already decoded, on all cores, instead of decoding the file
+  a second time (1400-pixel preview: 0.47 s -> 0.12 s for this step on the CI runner; at most one
+  8-bit step of difference, in the comparison layer only).
+- The full-screen view no longer decodes and keeps a second full-resolution copy of the original.
+- Thread-safe caches use Swift's `Mutex`: their thread safety is now checked by the compiler.
+- The profile is read in one place (`AppSettings.readProfile`); sandbox access to files goes
+  through one helper.
+
+### Tests
+- Session storage (unreadable, older and future files, failed saves, moved files), the in-memory
+  sRGB conversion (matches decoding again; strips do not change the result), VoiceOver labels,
+  timings of the full-screen path by stage. 171 tests.
+
 ## [0.0.8] - 2026-11-28
 Eighth pre-release. Not verified on physical prints.
 
