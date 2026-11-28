@@ -436,22 +436,12 @@ final class PreviewSession: Sendable {
     }
 
     private func sRGBCopy(of loaded: ColorCorrectionService.LoadedSource, sourceURL: URL, maxDimension: Int) throws -> Data {
-        let sRGBDevice: Data
-        if loaded.embeddedICC == nil {
-            sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
-                loaded.pixels, width: loaded.width, height: loaded.height,
-                transform: nil, orientation: loaded.orientation
-            )
-        } else {
-            let converted = try ColorCorrectionService.loadSource(
-                from: sourceURL, maxDimension: maxDimension, forceSRGB: true
-            )
-            sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
-                converted.pixels, width: converted.width, height: converted.height,
-                transform: nil, orientation: converted.orientation
-            )
-        }
-        return sRGBDevice
+        // A source with its own profile is converted to sRGB by ColorSync (as any application
+        // would hand it to the printer), from the pixels already decoded.
+        let sRGB = try ColorCorrectionService.convertedToSRGB(loaded)
+        return try ColorCorrectionService.convertRGBX16Pixels(
+            sRGB.pixels, width: sRGB.width, height: sRGB.height, transform: nil, orientation: sRGB.orientation
+        )
     }
 
     private func correct(

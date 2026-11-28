@@ -303,6 +303,50 @@ enum ColorCorrectionService {
         )
     }
 
+    /// The decoded pixels converted to sRGB by the system colour engine (ColorSync), as decoding
+    /// the file again with `forceSRGB` would, without the second decode and on every core: the
+    /// image is converted in horizontal strips at once (the conversion is per pixel, so the
+    /// strips do not change the result). A source without a profile is returned as it is.
+    static func convertedToSRGB(_ loaded: LoadedSource, strips requested: Int? = nil) throws -> LoadedSource {
+        guard let iccData = loaded.embeddedICC else { return loaded }
+        guard let sourceSpace = CGColorSpace(iccData: iccData as CFData),
+              let sRGB = CGColorSpace(name: CGColorSpace.sRGB) else { throw CorrectionError.bitmapContext }
+        let width = loaded.width, height = loaded.height, bytesPerRow = width * 8
+        let bitmapInfo = CGBitmapInfo.byteOrder16Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
+        guard let provider = CGDataProvider(data: loaded.pixels as CFData),
+              let image = CGImage(width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 64,
+                                  bytesPerRow: bytesPerRow, space: sourceSpace, bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+                                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        else { throw CorrectionError.bitmapContext }
+
+        let strips = max(1, min(requested ?? ProcessInfo.processInfo.activeProcessorCount, height))
+        let rowsPerStrip = (height + strips - 1) / strips
+        var output = Data(count: bytesPerRow * height)
+        let failed = CancellationFlag()
+        output.withUnsafeMutableBytes { raw in
+            guard let start = raw.baseAddress else { failed.set(); return }
+            // Each strip writes only its own rows of the buffer, which outlives concurrentPerform.
+            nonisolated(unsafe) let base = start
+            DispatchQueue.concurrentPerform(iterations: strips) { strip in
+                let top = strip * rowsPerStrip
+                let rows = min(rowsPerStrip, height - top)
+                guard rows > 0 else { return }
+                guard let part = image.cropping(to: CGRect(x: 0, y: top, width: width, height: rows)),
+                      let context = CGContext(data: base + top * bytesPerRow, width: width, height: rows,
+                                              bitsPerComponent: 16, bytesPerRow: bytesPerRow, space: sRGB, bitmapInfo: bitmapInfo)
+                else { failed.set(); return }
+                context.interpolationQuality = .none
+                context.draw(part, in: CGRect(x: 0, y: 0, width: width, height: rows))
+            }
+        }
+        if failed.isSet { throw CorrectionError.bitmapContext }
+        return LoadedSource(
+            pixels: output, width: width, height: height, orientation: loaded.orientation,
+            embeddedICC: nil, interpretation: .convertedToSRGB, dpi: loaded.dpi,
+            profileName: loaded.profileName, colorModel: loaded.colorModel
+        )
+    }
+
     /// Wraps oriented 8-bit RGBX pixels (alpha byte ignored) into a CGImage.
     static func makeImage(rgbx: Data, width: Int, height: Int, colorSpace: CGColorSpace) throws -> CGImage {
         guard rgbx.count == width * height * 4,

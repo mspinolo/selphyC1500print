@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import XCTest
 @testable import SELPHYCP1500Print
 
@@ -135,5 +137,73 @@ final class SessionStorageTests: XCTestCase {
         XCTAssertEqual(url.withSecurityScope { $0 }, url)
         struct Failure: Error {}
         XCTAssertThrowsError(try url.withSecurityScope { _ in throw Failure() })
+    }
+}
+
+/// The sRGB copy of a photo with its own profile (the "uncorrected" layers) is made from the
+/// pixels already decoded, in parallel strips, and matches decoding the file again into sRGB.
+final class SRGBConversionTests: XCTestCase {
+    private func writeP3Photo(width: Int, height: Int) throws -> URL {
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        // Saturated ramps (outside sRGB too), neutrals and a hard edge across strip boundaries.
+        for x in 0..<width {
+            let t = CGFloat(x) / CGFloat(width - 1)
+            context.setFillColor(CGColor(colorSpace: space, components: [t, 1 - t, 0.3 + 0.7 * t * t, 1])!)
+            context.fill(CGRect(x: x, y: 0, width: 1, height: height / 2))
+            context.setFillColor(CGColor(colorSpace: space, components: [t, t, t, 1])!)
+            context.fill(CGRect(x: x, y: height / 2, width: 1, height: height - height / 2))
+        }
+        context.setFillColor(CGColor(colorSpace: space, components: [0, 0.9, 0.1, 1])!)
+        context.fill(CGRect(x: width / 3, y: height / 4, width: width / 3, height: height / 2))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-p3-\(UUID().uuidString).png")
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    private func eightBit(_ loaded: ColorCorrectionService.LoadedSource) throws -> [UInt8] {
+        [UInt8](try ColorCorrectionService.convertRGBX16Pixels(
+            loaded.pixels, width: loaded.width, height: loaded.height, transform: nil, orientation: loaded.orientation))
+    }
+
+    func testTheInMemoryConversionMatchesDecodingAgainIntoSRGB() throws {
+        let url = try writeP3Photo(width: 997, height: 613)
+        let loaded = try ColorCorrectionService.loadSource(from: url)
+        XCTAssertNotNil(loaded.embeddedICC, "the test photo carries Display P3")
+        let converted = try ColorCorrectionService.convertedToSRGB(loaded)
+        XCTAssertNil(converted.embeddedICC)
+        XCTAssertEqual(converted.interpretation, .convertedToSRGB)
+        let reference = try eightBit(ColorCorrectionService.loadSource(from: url, forceSRGB: true))
+        let fast = try eightBit(converted)
+        XCTAssertEqual(reference.count, fast.count)
+        var maximum = 0, differing = 0
+        for index in reference.indices where index % 4 != 3 {
+            let delta = abs(Int(reference[index]) - Int(fast[index]))
+            maximum = max(maximum, delta)
+            if delta > 0 { differing += 1 }
+        }
+        XCTAssertLessThanOrEqual(maximum, 1, "same ColorSync conversion, at most a rounding step apart")
+        XCTAssertLessThan(Double(differing) / Double(reference.count * 3 / 4), 0.01)
+        print("Preview check sRGB copy: max difference \(maximum), \(differing) of \(reference.count * 3 / 4) channels differ")
+    }
+
+    func testTheStripsDoNotChangeTheResult() throws {
+        let url = try writeP3Photo(width: 640, height: 481)
+        let loaded = try ColorCorrectionService.loadSource(from: url)
+        let whole = try ColorCorrectionService.convertedToSRGB(loaded, strips: 1).pixels
+        for strips in [2, 7, 481, 2000] {
+            XCTAssertEqual(try ColorCorrectionService.convertedToSRGB(loaded, strips: strips).pixels, whole, "\(strips) strips")
+        }
+    }
+
+    func testAPhotoWithoutProfileIsLeftAsItIs() throws {
+        let loaded = ColorCorrectionService.LoadedSource(
+            pixels: Data(repeating: 7, count: 8 * 8 * 8), width: 8, height: 8, orientation: 1, embeddedICC: nil,
+            interpretation: .assumedSRGB, dpi: nil, profileName: nil, colorModel: nil)
+        XCTAssertEqual(try ColorCorrectionService.convertedToSRGB(loaded).pixels, loaded.pixels)
     }
 }
