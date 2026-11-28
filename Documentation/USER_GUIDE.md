@@ -95,7 +95,8 @@ check the correction on their own printer. It remembers where you are between se
    2014 (default), from November 2014, the 2005 and 1976 data, the BabelColor average, ColorChecker
    SG before / from November 2014, or your own values (CSV or CGATS).
 3. **Files to print** — the test chart (original, corrected Perceptual, corrected Relative
-   colorimetric; with Image Optimize off and on) and up to four photographs of yours, exported
+   colorimetric; with Image Optimize off and on) and up to four photographs (yours, or the four test
+   pictures that come with the app: **Use the built-in test pictures**), exported
    with blind codes (P01, P02, …) in random order, plus the print order and a sealed key.
 4. **Print session** — checklist and a record of the conditions.
 5. **Scanner check** — scan the ColorChecker, click its four corner patches; the error of the

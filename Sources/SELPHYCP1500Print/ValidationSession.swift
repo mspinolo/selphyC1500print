@@ -161,7 +161,15 @@ enum ValidationMode: String, Codable, CaseIterable, Identifiable, Sendable {
 struct PhotoSlot: Codable, Equatable, Sendable {
     var role: PhotoRole
     var name: String
+    /// Empty for a built-in picture.
     var bookmark: Data
+    /// One of the test pictures that come with the app (no bookmark needed).
+    var builtIn: Bool? = nil
+
+    /// The file of this photograph: the built-in picture, or the bookmarked file of the user.
+    var url: URL? {
+        builtIn == true ? BuiltInTestPhotos.url(for: role) : Bookmarks.resolve(bookmark)
+    }
 }
 
 struct ScanEntry: Codable, Equatable, Sendable {
@@ -233,7 +241,7 @@ struct ValidationSessionData: Codable, Equatable {
         func renewOptional(_ bookmark: inout Data?) {
             if let current = bookmark, let fresh = Bookmarks.renewed(current) { bookmark = fresh; changed = true }
         }
-        for index in photos.indices { renew(&photos[index].bookmark) }
+        for index in photos.indices where photos[index].builtIn != true { renew(&photos[index].bookmark) }
         for code in Array(scans.keys) { if var entry = scans[code] { renew(&entry.bookmark); scans[code] = entry } }
         renewOptional(&exportFolderBookmark)
         renewOptional(&scannerProfileBookmark)
@@ -387,6 +395,16 @@ final class ValidationModel {
         data.exportedAt = nil
     }
 
+    /// Fills the four photographs with the test pictures that come with the app.
+    func useBuiltInPhotos() {
+        guard BuiltInTestPhotos.available else { return }
+        data.photos = PhotoRole.allCases.map { role in
+            PhotoSlot(role: role, name: BuiltInTestPhotos.fileName(for: role), bookmark: Data(), builtIn: true)
+        }
+        data.plan = []
+        data.exportedAt = nil
+    }
+
     func makePlan() {
         let roles = PhotoRole.allCases.filter { role in data.photos.contains { $0.role == role } }
         data.plan = ValidationPlan.make(mode: data.mode, photos: roles)
@@ -452,7 +470,7 @@ final class ValidationModel {
             case .chart(let variant):
                 source = chartFiles[variant.modelVariant]!
             case .photo(let role, let isCorrected):
-                guard let slot = photos.first(where: { $0.role == role }), let url = Bookmarks.resolve(slot.bookmark) else { continue }
+                guard let slot = photos.first(where: { $0.role == role }), let url = slot.url else { continue }
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 if isCorrected {

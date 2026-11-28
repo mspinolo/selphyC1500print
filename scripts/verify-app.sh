@@ -10,6 +10,10 @@ sips -g pixelWidth "$app/Contents/Resources/$icon.icns" >/dev/null || { echo "::
 [ -s "$app/Contents/Resources/Credits.rtf" ] || { echo "::error::missing Credits.rtf"; exit 1; }
 grep -q "Permission is hereby granted" "$app/Contents/Resources/Licenses/LittleCMS-LICENSE.txt" \
   || { echo "::error::missing LittleCMS licence text"; exit 1; }
+for photo in portrait-skin-tones foliage-sky low-key black-and-white; do
+  sips -g pixelWidth "$app/Contents/Resources/TestPhotos/$photo.png" 2>/dev/null | grep -q "pixelWidth: 1800" \
+    || { echo "::error::missing or wrong test picture $photo.png"; exit 1; }
+done
 codesign --verify --strict --deep "$app"
 ent=$(codesign -d --entitlements - --xml "$app" 2>/dev/null || codesign -d --entitlements :- "$app")
 for k in com.apple.security.app-sandbox com.apple.security.files.user-selected.read-write com.apple.security.files.bookmarks.app-scope com.apple.security.print; do

@@ -209,3 +209,64 @@ final class SRGBConversionTests: XCTestCase {
         XCTAssertEqual(try ColorCorrectionService.convertedToSRGB(loaded).pixels, loaded.pixels)
     }
 }
+
+/// The four test pictures that come with the app, and their use in the validation assistant.
+@MainActor
+final class BuiltInTestPhotoTests: XCTestCase {
+    func testTheFourPicturesAreThereAsPrintReadySRGB() throws {
+        XCTAssertTrue(BuiltInTestPhotos.available)
+        for role in PhotoRole.allCases {
+            let url = try XCTUnwrap(BuiltInTestPhotos.url(for: role))
+            let loaded = try ColorCorrectionService.loadSource(from: url)
+            XCTAssertEqual(loaded.width, 1800, role.rawValue)
+            XCTAssertEqual(loaded.height, 1200, role.rawValue)
+            XCTAssertEqual(loaded.dpi?.width ?? 0, 300, accuracy: 1, "6 x 4 in at 300 ppi")
+            XCTAssertNotNil(loaded.embeddedICC, "\(role.rawValue) carries its sRGB profile")
+        }
+        // The black-and-white picture is exactly neutral.
+        let bw = try ColorCorrectionService.loadSource(from: try XCTUnwrap(BuiltInTestPhotos.url(for: .blackAndWhite)), forceSRGB: true)
+        let pixels = [UInt8](try ColorCorrectionService.convertRGBX16Pixels(bw.pixels, width: bw.width, height: bw.height, transform: nil, orientation: 1))
+        var maximum = 0
+        for index in stride(from: 0, to: pixels.count, by: 4 * 97) {
+            maximum = max(maximum, abs(Int(pixels[index]) - Int(pixels[index + 1])), abs(Int(pixels[index + 1]) - Int(pixels[index + 2])))
+        }
+        XCTAssertLessThanOrEqual(maximum, 1)
+    }
+
+    func testTheAssistantCanUseThemAndPrintThem() throws {
+        let suite = "selphy-builtin-\(UUID().uuidString)"
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        let model = ValidationModel(settings: settings, storeURL: nil)
+        model.useBuiltInPhotos()
+        XCTAssertEqual(model.data.photos.map(\.role), PhotoRole.allCases)
+        XCTAssertTrue(model.data.photos.allSatisfy { $0.builtIn == true && $0.url != nil })
+        // A session saved with built-in pictures reads back (and has no bookmark to renew).
+        let encoded = try JSONEncoder().encode(model.data)
+        var decoded = try JSONDecoder().decode(ValidationSessionData.self, from: encoded)
+        XCTAssertEqual(decoded.photos, model.data.photos)
+        XCTAssertFalse(decoded.renewStaleBookmarks())
+
+        guard let path = ProcessInfo.processInfo.environment["SELPHY_TEST_PRINTER_PROFILE"] else {
+            throw XCTSkip("Set SELPHY_TEST_PRINTER_PROFILE to write the print set.")
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("selphy-builtin-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let plan = ValidationPlan.make(mode: .scanner, photos: PhotoRole.allCases, seed: 9)
+        let target = try ValidationModel.writePrintSet(plan: plan, photos: model.data.photos, folder: folder,
+                                                       profileURL: URL(fileURLWithPath: path))
+        let printed = try FileManager.default.contentsOfDirectory(atPath: target.path).filter { $0.hasSuffix(".png") }
+        XCTAssertEqual(printed.count, plan.count, "chart variants plus every picture, original and corrected")
+        for item in plan {
+            guard case .photo(let role, let corrected) = item.content else { continue }
+            let file = target.appendingPathComponent("\(item.code).png")
+            let original = try Data(contentsOf: try XCTUnwrap(BuiltInTestPhotos.url(for: role)))
+            if corrected {
+                XCTAssertNotEqual(try Data(contentsOf: file), original, "\(role.rawValue) corrected")
+            } else {
+                XCTAssertEqual(try Data(contentsOf: file), original, "\(role.rawValue) original, untouched")
+            }
+        }
+    }
+}

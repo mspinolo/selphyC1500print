@@ -166,7 +166,8 @@ Owner feedback (2026-11-24, screenshot of release 0.0.1): the window is unattrac
 - [x] `ObservableObject` -> Observation (`@Observable`, `@Environment(Type.self)`, `@Bindable`); the localizer is observable, so `tr()` makes a view follow the language. The validation session model belongs to the app.
 - [x] Interface tests (owner request): windows driven through the accessibility tree in CI (the test process finishes launching NSApplication and connects as an accessibility client), drawing-based checks, observation tests.
 - [x] Review pass (2026-11-28): full-resolution decodes, in-memory parallel sRGB copy, safe validation session storage, stale bookmarks renewed, `Mutex`, VoiceOver labels.
-- [ ] Possible: in the full-screen view, skip the analysis and make the sRGB copy only when the uncorrected layer is needed (the first layer of the Corrected and Original modes would come about 2 s sooner on 3 cores; no gain in Compare).
+- [x] Full screen: each layer computes only what it needs (corrected view 8.2 s -> 5.4 s on 3 cores).
+- [x] Built-in synthetic test pictures for the four photo roles of the validation (`scripts/make-test-photos.py`).
 - [ ] Raise the minimum to macOS 27.2 (`Package.swift`, `Packaging/Info.plist`, README, user guide) once the CI runner image runs 27.2: a binary built for 27.2 does not run on the 27.0.1 runner, so the macOS tests would stop running.
 
 ### M6 - Release

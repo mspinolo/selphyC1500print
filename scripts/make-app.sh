@@ -24,6 +24,9 @@ cp Packaging/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 cp Packaging/Credits.rtf "$app/Contents/Resources/Credits.rtf"
 mkdir -p "$app/Contents/Resources/Licenses"
 cp Sources/CLittleCMS/LICENSE "$app/Contents/Resources/Licenses/LittleCMS-LICENSE.txt"
+# The test pictures of the validation assistant (rendered by scripts/make-test-photos.py).
+mkdir -p "$app/Contents/Resources/TestPhotos"
+cp Packaging/TestPhotos/*.png "$app/Contents/Resources/TestPhotos/"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 plutil -lint "$app/Contents/Info.plist"
 

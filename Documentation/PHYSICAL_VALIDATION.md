@@ -36,7 +36,8 @@ All chart sheets use the same chart file; V1, V2 are produced with the app (outp
 | V3 | same file as V1 | **ON** (printer default) | does the printer-side optimisation act on this route? |
 | V4 | same file as V0 | **ON** | control for V3 |
 
-Plus 4 photographs (portrait, foliage/sky, low-key, black-and-white), each as original (OFF) and
+Plus 4 photographs (portrait, foliage/sky, low-key, black-and-white; the app includes a synthetic
+set made for this, see `Packaging/TestPhotos` and `scripts/make-test-photos.py`), each as original (OFF) and
 corrected Perceptual (OFF): 8 sheets. Total 13. The black-and-white photo settles the open
 question on neutral rendering.
 

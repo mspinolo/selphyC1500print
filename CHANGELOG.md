@@ -3,6 +3,20 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
+## [Unreleased]
+
+### Added
+- **Built-in test pictures** for the physical validation, one per role: skin tones (six tones from
+  light to deep, softly lit), foliage and sky, a low-key still life, a neutral grey still life with
+  a 21-step wedge. Synthetic (rendered by `scripts/make-test-photos.py`, deterministic): free of
+  rights, every tone known. 1800 x 1200 px (6 x 4 in at 300 ppi), sRGB PNG. In the assistant:
+  **Use the built-in test pictures**; your own photographs can still be chosen.
+
+### Changed
+- Full screen: each full-resolution layer computes only what it needs (no statistics; the sRGB copy
+  only for the view without correction). The corrected view of a 24-megapixel photo appears about a
+  third sooner (CI, 3 cores: 8.2 s -> 5.4 s); switching views reuses what was computed.
+
 ## [0.0.9] - 2026-11-28
 Ninth pre-release. Not verified on physical prints.
 

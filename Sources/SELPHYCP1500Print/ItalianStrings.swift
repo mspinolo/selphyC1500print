@@ -3,6 +3,10 @@
 // the placeholders match.
 enum ItalianStrings {
     static let table: [String: String] = [
+        "The chart is printed five times: original and corrected, with the printer's Image Optimize off and on, and corrected with the other rendering intent. Four photographs (optional: your own, or the test pictures that come with the app) are printed as original and corrected.": "La carta di prova viene stampata cinque volte: originale e corretta, con l'Image Optimize della stampante disattivato e attivo, e corretta con l'altro rendering intent. Quattro fotografie (facoltative: tue, o le immagini di prova incluse nell'app) vengono stampate originali e corrette.",
+        "built-in": "inclusa",
+        "Use the built-in test pictures": "Usa le immagini di prova incluse",
+        "Four synthetic pictures made for this test (skin tones from light to deep, foliage and sky, a dark still life, a neutral grey still life with a step wedge): every tone is known and they can be shared freely. Your own photographs show the problems on the pictures you print.": "Quattro immagini sintetiche create per questa prova (incarnati dal chiaro allo scuro, fogliame e cielo, una natura morta scura, una natura morta in grigi neutri con scala di grigi): ogni tono è noto e si possono condividere liberamente. Le tue fotografie mostrano i problemi sulle immagini che stampi davvero.",
         "Completed": "Completato",
         "Passed": "Superato",
         "Not passed": "Non superato",
@@ -368,8 +372,7 @@ enum ItalianStrings {
         "That is much lower: the scan was probably already converted, so do not apply the scanner profile again.": "È molto più basso: probabilmente la scansione era già convertita, quindi non applicare di nuovo il profilo dello scanner.",
         "The black-and-white photograph settles how neutral greys print; skin tones, foliage and dark pictures show the typical problems.": "La fotografia in bianco e nero mostra come vengono stampati i grigi neutri; incarnato, fogliame e immagini scure mostrano i problemi tipici.",
         "The chart is printed as original and corrected; your photographs as original and corrected, to be compared side by side.": "La carta di prova viene stampata originale e corretta; le tue fotografie originali e corrette, da confrontare affiancate.",
-        "The chart is printed five times: original and corrected, with the printer's Image Optimize off and on, and corrected with the other rendering intent. Four photographs of your own (optional) are printed as original and corrected.": "La carta di prova viene stampata cinque volte: originale e corretta, con Image Optimize della stampante spento e acceso, e corretta con l'altro intento di rendering. Quattro tue fotografie (facoltative) vengono stampate originali e corrette.",
-        "The choices, results and notes of the current session are discarded. Exported files are not touched.": "Scelte, risultati e note della sessione corrente vengono scartati. I file esportati non vengono toccati.",
+                "The choices, results and notes of the current session are discarded. Exported files are not touched.": "Scelte, risultati e note della sessione corrente vengono scartati. I file esportati non vengono toccati.",
         "The code written on the back of every print, nothing else.": "Il codice scritto sul retro di ogni stampa, nient'altro.",
         "The corner marks do not form the expected rectangle: check the scan.": "I marcatori d'angolo non formano il rettangolo atteso: controlla la scansione.",
         "The export also writes the per-variant results in the format of the project's Python tools (validation/report.py can merge them), the scanner check and the key of the print order. Do not share scans or personal photographs.": "L'esportazione scrive anche i risultati per variante nel formato degli strumenti Python del progetto (validation/report.py li può unire), il controllo dello scanner e la chiave dell'ordine di stampa. Non condividere scansioni o fotografie personali.",

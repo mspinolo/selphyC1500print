@@ -282,7 +282,7 @@ struct ValidationAssistantView: View {
     private var files: some View {
         VStack(alignment: .leading, spacing: 12) {
             paragraph(model.data.mode == .scanner
-                      ? tr("The chart is printed five times: original and corrected, with the printer's Image Optimize off and on, and corrected with the other rendering intent. Four photographs of your own (optional) are printed as original and corrected.")
+                      ? tr("The chart is printed five times: original and corrected, with the printer's Image Optimize off and on, and corrected with the other rendering intent. Four photographs (optional: your own, or the test pictures that come with the app) are printed as original and corrected.")
                       : tr("The chart is printed as original and corrected; your photographs as original and corrected, to be compared side by side."))
             GroupBox(tr("Photographs")) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -291,6 +291,7 @@ struct ValidationAssistantView: View {
                             Text(role.title).frame(width: 190, alignment: .leading)
                             if let slot = model.data.photos.first(where: { $0.role == role }) {
                                 Text(slot.name).lineLimit(1).truncationMode(.middle)
+                                if slot.builtIn == true { Text(tr("built-in")).font(.caption).foregroundStyle(.secondary) }
                                 Spacer()
                                 Button(tr("Remove")) { model.setPhoto(nil, for: role) }
                             } else {
@@ -299,6 +300,13 @@ struct ValidationAssistantView: View {
                             }
                             Button(tr("Choose…")) { choosePhoto(role) }
                         }
+                    }
+                    if BuiltInTestPhotos.available {
+                        HStack {
+                            Button(tr("Use the built-in test pictures")) { model.useBuiltInPhotos() }
+                            Spacer()
+                        }
+                        note(tr("Four synthetic pictures made for this test (skin tones from light to deep, foliage and sky, a dark still life, a neutral grey still life with a step wedge): every tone is known and they can be shared freely. Your own photographs show the problems on the pictures you print."))
                     }
                     note(tr("The black-and-white photograph settles how neutral greys print; skin tones, foliage and dark pictures show the typical problems."))
                 }
