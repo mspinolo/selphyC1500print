@@ -3,7 +3,7 @@
 Versioning: `0.0.x` pre-releases while verification is incomplete; `1.0.0` only once the
 checklist in `Documentation/RELEASE.md` is fully ticked.
 
-## [0.0.8] - 2026-11-27
+## [0.0.8] - 2026-11-28
 Eighth pre-release. Not verified on physical prints.
 
 ### Fixed
