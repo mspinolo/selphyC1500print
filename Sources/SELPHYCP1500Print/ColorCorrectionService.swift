@@ -313,30 +313,33 @@ enum ColorCorrectionService {
               let sRGB = CGColorSpace(name: CGColorSpace.sRGB) else { throw CorrectionError.bitmapContext }
         let width = loaded.width, height = loaded.height, bytesPerRow = width * 8
         let bitmapInfo = CGBitmapInfo.byteOrder16Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
-        guard let provider = CGDataProvider(data: loaded.pixels as CFData),
-              let image = CGImage(width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 64,
-                                  bytesPerRow: bytesPerRow, space: sourceSpace, bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
-                                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-        else { throw CorrectionError.bitmapContext }
-
         let strips = max(1, min(requested ?? ProcessInfo.processInfo.activeProcessorCount, height))
         let rowsPerStrip = (height + strips - 1) / strips
         var output = Data(count: bytesPerRow * height)
         let failed = CancellationFlag()
-        output.withUnsafeMutableBytes { raw in
-            guard let start = raw.baseAddress else { failed.set(); return }
-            // Each strip writes only its own rows of the buffer, which outlives concurrentPerform.
-            nonisolated(unsafe) let base = start
-            DispatchQueue.concurrentPerform(iterations: strips) { strip in
-                let top = strip * rowsPerStrip
-                let rows = min(rowsPerStrip, height - top)
-                guard rows > 0 else { return }
-                guard let part = image.cropping(to: CGRect(x: 0, y: top, width: width, height: rows)),
-                      let context = CGContext(data: base + top * bytesPerRow, width: width, height: rows,
-                                              bitsPerComponent: 16, bytesPerRow: bytesPerRow, space: sRGB, bitmapInfo: bitmapInfo)
-                else { failed.set(); return }
-                context.interpolationQuality = .none
-                context.draw(part, in: CGRect(x: 0, y: 0, width: width, height: rows))
+        loaded.pixels.withUnsafeBytes { sourceRaw in
+            output.withUnsafeMutableBytes { outputRaw in
+                guard let sourceStart = sourceRaw.baseAddress, let outputStart = outputRaw.baseAddress else { failed.set(); return }
+                // Each strip reads and writes only its own rows; both buffers outlive concurrentPerform,
+                // and each strip's image is drawn (and released) before its iteration ends.
+                nonisolated(unsafe) let source = sourceStart
+                nonisolated(unsafe) let destination = outputStart
+                DispatchQueue.concurrentPerform(iterations: strips) { strip in
+                    let top = strip * rowsPerStrip
+                    let rows = min(rowsPerStrip, height - top)
+                    guard rows > 0 else { return }
+                    // An image over the strip's own rows (no copy, nothing else read).
+                    guard let provider = CGDataProvider(dataInfo: nil, data: source + top * bytesPerRow, size: rows * bytesPerRow,
+                                                        releaseData: { _, _, _ in }),
+                          let part = CGImage(width: width, height: rows, bitsPerComponent: 16, bitsPerPixel: 64,
+                                             bytesPerRow: bytesPerRow, space: sourceSpace, bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+                                             provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+                          let context = CGContext(data: destination + top * bytesPerRow, width: width, height: rows,
+                                                  bitsPerComponent: 16, bytesPerRow: bytesPerRow, space: sRGB, bitmapInfo: bitmapInfo)
+                    else { failed.set(); return }
+                    context.interpolationQuality = .none
+                    context.draw(part, in: CGRect(x: 0, y: 0, width: width, height: rows))
+                }
             }
         }
         if failed.isSet { throw CorrectionError.bitmapContext }

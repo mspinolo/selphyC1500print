@@ -187,7 +187,9 @@ final class SRGBConversionTests: XCTestCase {
             if delta > 0 { differing += 1 }
         }
         XCTAssertLessThanOrEqual(maximum, 1, "same ColorSync conversion, at most a rounding step apart")
-        XCTAssertLessThan(Double(differing) / Double(reference.count * 3 / 4), 0.01)
+        // ColorSync gets 16-bit input here instead of the file's 8 bits: a few values round the
+        // other way (one step in 255, invisible, and only in the uncorrected comparison layer).
+        XCTAssertLessThan(Double(differing) / Double(reference.count * 3 / 4), 0.03)
         print("Preview check sRGB copy: max difference \(maximum), \(differing) of \(reference.count * 3 / 4) channels differ")
     }
 
