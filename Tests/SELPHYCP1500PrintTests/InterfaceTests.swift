@@ -55,7 +55,6 @@ final class HostedView {
             clientStatus = AccessibilityClient.connect(pumping: probe)
             available = probe.waitUntil(timeout: 3) { probe.control("Accessibility probe") != nil }
         }
-        print("Interface probe: client \(clientStatus) available=\(available)")
         cachedAvailability = available
         return available
     }
@@ -345,7 +344,11 @@ final class InterfaceTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         guard HostedView.accessibilityAvailable else {
-            throw XCTSkip("The SwiftUI accessibility tree is not available in this process (no accessibility client); see InterfaceDrawingTests.")
+            let reason = "The SwiftUI accessibility tree is not available: give the app running the tests (Terminal, Xcode) "
+                + "access in System Settings > Privacy & Security > Accessibility. \(HostedView.clientStatus)"
+            // In CI these tests must run: a silent skip would hide a broken interface.
+            if ProcessInfo.processInfo.environment["CI"] == "true" { XCTFail(reason) }
+            throw XCTSkip(reason)
         }
     }
 

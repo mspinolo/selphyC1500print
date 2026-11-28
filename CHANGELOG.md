@@ -24,6 +24,15 @@ Eighth pre-release. Not verified on physical prints.
 - **Requires macOS 27.0 or later** (was 14). Built with Xcode 27.2 and Swift 6.4 in the Swift 6
   language mode (data races checked at compile time); deprecated APIs replaced. The minimum will
   move to macOS 27.2 once the CI runner can test on it.
+- App state uses Swift **Observation** (`@Observable`) instead of `ObservableObject`: each window
+  redraws only for what it shows. The interface language is observable too, so every open window
+  changes language at once.
+
+### Tests
+- **Interface tests**: each window is opened in a real window and used through its accessibility
+  tree (buttons, switches, radio groups, menus opened and items picked), checking what it shows
+  and that the settings change; drawing-based checks that windows follow changes made elsewhere;
+  observation tests for every model. 163 tests in all.
 - "Generate test copies" is now **Generate corrected copies**, with a tooltip saying what it does
   and how many photos it converts; when it is disabled, the reason (no profile, no photos) is shown
   next to it.

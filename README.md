@@ -37,7 +37,7 @@ SELPHY_CORE_LIB="$PWD/build/libselphy_core_shared.so" python3 -m unittest discov
 SELPHY_TEST_PRINTER_PROFILE="$PWD/ICC-Profile165-CP1500.icc" swift test
 ```
 
-The core tests check error handling (truncated/garbage/wrong-class profiles), BPC semantics, that the optimised transform matches the exact pipeline (DeltaE2000), that the printer's own forward model reproduces the intended appearance for neutrals and skin tones, tone-curve monotonicity, 8-bit/16-bit consistency and honouring of wide-gamut source profiles. The macOS suite covers ICC inspection, buffer handling, PNG output (dimensions, sRGB tag), source immutability, batch failure cleanup, end-to-end appearance, 16-bit / linear / Display P3 inputs, the preview and full-screen pipelines, the statistics, the validation assistant (chart identical to the Python one, analysis of synthetic scans, report) and window snapshots. The Python suite checks the validation tools on synthetic scans and that the app's C implementation finds the same corner marks and samples.
+The core tests check error handling (truncated/garbage/wrong-class profiles), BPC semantics, that the optimised transform matches the exact pipeline (DeltaE2000), that the printer's own forward model reproduces the intended appearance for neutrals and skin tones, tone-curve monotonicity, 8-bit/16-bit consistency and honouring of wide-gamut source profiles. The macOS suite covers ICC inspection, buffer handling, PNG output (dimensions, sRGB tag), source immutability, batch failure cleanup, end-to-end appearance, 16-bit / linear / Display P3 inputs, the preview and full-screen pipelines, the statistics, the validation assistant (chart identical to the Python one, analysis of synthetic scans, report), window snapshots, and the **interface**: every window (main, Settings, Statistics, full screen, assistant) is opened in a real window and used as a person would, through its accessibility tree — buttons pressed, switches toggled, menus opened and items picked — checking what the window then shows and that the settings change; further tests check, from what each window draws, that it follows changes made elsewhere (language, profile, theme, preview options, selection), and that the models notify exactly the views that read them. The Python suite checks the validation tools on synthetic scans and that the app's C implementation finds the same corner marks and samples.
 
 These checks establish that the software does what the colour model says. They do **not** establish that the model produces more accurate physical prints; that is the optional track P in the roadmap.
 
@@ -57,6 +57,8 @@ scripts/make-app.sh     # sandboxed, ad-hoc signed .app (see Documentation/RELEA
 ```
 
 The portable colour core also builds and tests on Linux with CMake (see Tests above).
+
+The interface tests drive the windows through the macOS accessibility API. To run them on your Mac, give the app you run `swift test` from (Terminal, Xcode) access in **System Settings > Privacy & Security > Accessibility**; without it they are skipped (in CI they must run, and fail instead).
 
 ## Next steps
 

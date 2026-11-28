@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import SwiftUI
 import XCTest
 @testable import SELPHYCP1500Print
@@ -124,16 +123,5 @@ final class InterfaceDrawingTests: XCTestCase {
         selection.selected = photos[2]
         XCTAssertGreaterThan(window.waitForDrawing(comparedWith: first, changed: true, timeout: 20), 0.002,
                              "the statistics did not follow the photo selected elsewhere")
-    }
-
-    /// Diagnostics only: what this process can see of its own accessibility tree.
-    func testAccessibilityProbe() throws {
-        let settings = try interfaceSettings(profile: false)
-        let available = HostedView.accessibilityAvailable
-        let window = HostedView(ContentView().environment(settings).environment(PhotoSelection()))
-        defer { window.close() }
-        window.pump(1)
-        print("Interface probe: available=\(available) client=\(HostedView.clientStatus) nodes=\(window.nodes().count)")
-        print("Interface probe: tree\n\(window.dump(limit: 80))")
     }
 }
