@@ -12,14 +12,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct SELPHYCP1500PrintApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var settings = AppSettings()
-    @StateObject private var selection = PhotoSelection()
+    @State private var settings: AppSettings
+    @State private var selection = PhotoSelection()
+    @State private var validation: ValidationModel
+
+    init() {
+        let settings = AppSettings()
+        _settings = State(initialValue: settings)
+        _validation = State(initialValue: ValidationModel(settings: settings))
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(settings)
-                .environmentObject(selection)
+                .environment(settings)
+                .environment(selection)
                 .onAppear { AppTheme.apply(settings.theme) }
                 .onChange(of: settings.theme) { AppTheme.apply(settings.theme) }
         }
@@ -37,22 +44,22 @@ struct SELPHYCP1500PrintApp: App {
         // A window of its own (not a sheet), so that it can stay open next to the preview.
         Window(tr("Colour deviation statistics"), id: StatisticsView.windowID) {
             StatisticsView()
-                .environmentObject(settings)
-                .environmentObject(selection)
+                .environment(settings)
+                .environment(selection)
         }
         .defaultSize(width: 920, height: 760)
         .windowResizability(.contentMinSize)
         // Advanced > Print validation assistant: the physical test, step by step (M3.3).
         Window(tr("Print validation assistant"), id: ValidationAssistantView.windowID) {
-            ValidationAssistantView(settings: settings)
-                .environmentObject(settings)
+            ValidationAssistantView(model: validation)
+                .environment(settings)
         }
         .defaultSize(width: 1040, height: 760)
         .windowResizability(.contentMinSize)
         .commands { AdvancedCommands() }
         Settings {
             SettingsView()
-                .environmentObject(settings)
+                .environment(settings)
         }
     }
 }

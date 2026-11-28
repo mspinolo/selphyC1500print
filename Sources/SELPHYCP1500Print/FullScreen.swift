@@ -45,7 +45,8 @@ enum FullScreenGeometry {
 }
 
 @MainActor
-final class FullScreenModel: ObservableObject {
+@Observable
+final class FullScreenModel {
     enum Mode: Int, CaseIterable, Identifiable {
         case original = 1, uncorrected, corrected, compare
         var id: Int { rawValue }
@@ -64,43 +65,43 @@ final class FullScreenModel: ObservableObject {
         case mode(Mode), toggleSideBySide, toggleActualPixels, zoomIn, zoomOut, previous, next, toggleHUD, close
     }
 
-    @Published private(set) var photos: [URL]
-    @Published private(set) var index: Int
-    @Published var mode: Mode = .compare
-    @Published var sideBySide = false
+    private(set) var photos: [URL]
+    private(set) var index: Int
+    var mode: Mode = .compare
+    var sideBySide = false
     /// Points per image pixel; nil = fit the screen.
-    @Published private(set) var zoom: CGFloat?
-    @Published private(set) var offset: CGSize = .zero
-    @Published var divider = 0.5
-    @Published private(set) var hudVisible = true
-    @Published private(set) var hudEnabled = true
+    private(set) var zoom: CGFloat?
+    private(set) var offset: CGSize = .zero
+    var divider = 0.5
+    private(set) var hudVisible = true
+    private(set) var hudEnabled = true
     /// The reduced preview, shown at once.
-    @Published private(set) var preview: PreviewService.Preview?
+    private(set) var preview: PreviewService.Preview?
     /// Full-resolution layers, arriving one by one (the one on screen first).
-    @Published private(set) var fullLayers: [PreviewSession.FullLayer: CGImage] = [:]
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
+    private(set) var fullLayers: [PreviewSession.FullLayer: CGImage] = [:]
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
     /// Full pixel size of the photo (oriented): the reduced preview shown first is drawn at this size.
-    @Published private(set) var imageSize: CGSize = .zero
+    private(set) var imageSize: CGSize = .zero
     /// The size of the view, set by the view.
-    @Published var area: CGSize = .zero {
+    var area: CGSize = .zero {
         didSet { offset = clamped(offset) }
     }
 
-    var backingScale: CGFloat = 2
-    var screen: NSScreen?
-    var pointerOnHUD = false
+    @ObservationIgnored var backingScale: CGFloat = 2
+    @ObservationIgnored var screen: NSScreen?
+    @ObservationIgnored var pointerOnHUD = false
     /// Off in the snapshots, so that the indications stay visible.
-    var autoHidesHUD = true
-    var onClose: (() -> Void)?
+    @ObservationIgnored var autoHidesHUD = true
+    @ObservationIgnored var onClose: (() -> Void)?
 
     private let settings: AppSettings
-    private weak var selection: PhotoSelection?
+    @ObservationIgnored private weak var selection: PhotoSelection?
     /// Full-resolution stages: the last two photos only (each can take hundreds of MB).
     private let fullSession = PreviewSession(corrections: 2, transforms: 2, renders: 2)
-    private var loadTask: Task<Void, Never>?
-    private var hudTask: Task<Void, Never>?
-    private var lastActivity = Date()
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var hudTask: Task<Void, Never>?
+    @ObservationIgnored private var lastActivity = Date()
 
     init(photos: [URL], current: URL?, settings: AppSettings, selection: PhotoSelection?) {
         self.photos = photos
@@ -369,8 +370,8 @@ final class FullScreenModel: ObservableObject {
         }
     }
 
-    private var currentLoad: UUID?
-    private var cancelFlag: CancellationFlag?
+    @ObservationIgnored private var currentLoad: UUID?
+    @ObservationIgnored private var cancelFlag: CancellationFlag?
 
     /// The layers on screen first, then the others.
     private func layerOrder() -> [PreviewSession.FullLayer] {
@@ -424,7 +425,7 @@ final class FullScreenController {
         window.appearance = NSAppearance(named: .darkAqua)
         window.collectionBehavior = [.fullScreenAuxiliary]
         window.acceptsMouseMovedEvents = true
-        window.contentView = NSHostingView(rootView: FullScreenView(model: model).environmentObject(settings))
+        window.contentView = NSHostingView(rootView: FullScreenView(model: model).environment(settings))
         window.setFrame(screen.frame, display: true)
 
         // Hide the menu bar and the Dock, unless a window is already in macOS full screen (there
@@ -486,7 +487,7 @@ final class FullScreenController {
 
 /// The content of the full-screen window.
 struct FullScreenView: View {
-    @ObservedObject var model: FullScreenModel
+    @Bindable var model: FullScreenModel
     @State private var dragBase: CGSize?
     @State private var magnifyBase: CGFloat?
 

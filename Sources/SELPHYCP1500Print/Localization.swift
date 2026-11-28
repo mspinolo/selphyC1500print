@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Interface languages. English is the default; Italian can be selected in the app.
 enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
@@ -20,15 +21,28 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
 /// Holds the language currently used by `tr`. The keys of the translation tables are the
 /// English texts, so English needs no table and a missing translation falls back to English.
-final class Localizer: @unchecked Sendable {
+///
+/// Observable: every view that calls `tr`, `trf` or `trn` while it is drawn reads `language`, so
+/// it is redrawn when the language changes, and only those views. Usable from any thread (the
+/// value is guarded by a lock; the observation registrar is thread-safe).
+final class Localizer: Observable, @unchecked Sendable {
     static let shared = Localizer()
 
     private let lock = NSLock()
     private var current = AppLanguage.english
+    private let registrar = ObservationRegistrar()
 
     var language: AppLanguage {
-        get { lock.lock(); defer { lock.unlock() }; return current }
-        set { lock.lock(); current = newValue; lock.unlock() }
+        get {
+            registrar.access(self, keyPath: \.language)
+            return lock.withLock { current }
+        }
+        set {
+            guard newValue != lock.withLock({ current }) else { return }
+            registrar.withMutation(of: self, keyPath: \.language) {
+                lock.withLock { current = newValue }
+            }
+        }
     }
 
     func translate(_ key: String) -> String {

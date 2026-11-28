@@ -5,20 +5,21 @@ import UniformTypeIdentifiers
 /// Computes the statistics table and the intent comparison off the main thread, through the
 /// session-wide `AnalysisStore` (results already computed are reused).
 @MainActor
-final class StatisticsModel: ObservableObject {
-    @Published private(set) var rows: [PhotoAnalysisRow] = []
-    @Published private(set) var intentResults: [IntentResult] = []
-    @Published private(set) var done = 0
-    @Published private(set) var total = 0
-    @Published private(set) var isWorking = false
-    @Published private(set) var scope: DeltaEScope?
-    @Published private(set) var gamutPoints: [GamutPoint] = []
-    @Published private(set) var printerOutline: GamutOutline?
-    private var outlineDigest: Data?
+@Observable
+final class StatisticsModel {
+    private(set) var rows: [PhotoAnalysisRow] = []
+    private(set) var intentResults: [IntentResult] = []
+    private(set) var done = 0
+    private(set) var total = 0
+    private(set) var isWorking = false
+    private(set) var scope: DeltaEScope?
+    private(set) var gamutPoints: [GamutPoint] = []
+    private(set) var printerOutline: GamutOutline?
+    @ObservationIgnored private var outlineDigest: Data?
 
     /// The analysis maps of the photo in the scope, kept so that changing the axis is immediate.
-    private var scopeMaps: PixelMaps?
-    private var scopeMapsKey: String?
+    @ObservationIgnored private var scopeMaps: PixelMaps?
+    @ObservationIgnored private var scopeMapsKey: String?
 
     let store: AnalysisStore
 
@@ -131,9 +132,9 @@ final class StatisticsModel: ObservableObject {
 struct StatisticsView: View {
     static let windowID = "statistics"
 
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var selection: PhotoSelection
-    @StateObject private var model = StatisticsModel()
+    @Environment(AppSettings.self) private var settings
+    @Environment(PhotoSelection.self) private var selection
+    @State private var model = StatisticsModel()
     @State private var printerICC: Data?
     @State private var profileDigest: Data?
     @State private var errorMessage: String?
@@ -290,7 +291,7 @@ struct StatisticsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             if photos.count > 1 {
-                Picker(tr("Photo"), selection: $selection.selected) {
+                Picker(tr("Photo"), selection: Bindable(selection).selected) {
                     ForEach(photos, id: \.self) { url in
                         Text(url.lastPathComponent).tag(Optional(url))
                     }
@@ -510,7 +511,7 @@ struct StatisticsView: View {
     private var table: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(tr("All loaded photos")).font(.headline)
-            Table(sortedRows, selection: $selection.selected, sortOrder: $sortOrder) {
+            Table(sortedRows, selection: Bindable(selection).selected, sortOrder: $sortOrder) {
                 TableColumn(tr("Photo"), value: \.name) { Text($0.name).lineLimit(1) }
                 TableColumn(tr("Mean"), value: \.sortMean) { Text($0.statistics.map { String(format: "%.1f", $0.mean) } ?? "—") }
                 TableColumn(tr("Median"), value: \.sortMedian) { Text($0.statistics.map { String(format: "%.1f", $0.median) } ?? "—") }

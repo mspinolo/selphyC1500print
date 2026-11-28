@@ -158,7 +158,8 @@ struct DeltaEScope: Equatable, Sendable {
 
 /// A column or row of the photo to mark on the preview, while the pointer is over the scope.
 @MainActor
-final class ScopeHighlight: ObservableObject {
+@Observable
+final class ScopeHighlight {
     static let shared = ScopeHighlight()
 
     struct Marker: Equatable {
@@ -170,14 +171,14 @@ final class ScopeHighlight: ObservableObject {
         let span: Double
     }
 
-    @Published var marker: Marker?
+    var marker: Marker?
 }
 
 /// Draws the scope marker over the preview image (same aspect-fit frame as the image).
 struct ScopeMarkerOverlay: View {
     let photo: URL?
     let aspect: CGFloat
-    @ObservedObject private var highlight = ScopeHighlight.shared
+    private let highlight = ScopeHighlight.shared
 
     var body: some View {
         Color.clear

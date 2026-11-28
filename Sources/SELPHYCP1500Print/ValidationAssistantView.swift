@@ -45,15 +45,16 @@ enum ValidationStep: String, CaseIterable, Identifiable {
 struct ValidationAssistantView: View {
     static let windowID = "validation"
 
-    @EnvironmentObject private var settings: AppSettings
-    @StateObject private var model: ValidationModel
+    @Environment(AppSettings.self) private var settings
+    @Bindable var model: ValidationModel
     @State private var step: ValidationStep? = .intro
     @State private var colorCheckerScan: ScanImage?
     @State private var colorCheckerThumbnail: CGImage?
     @State private var confirmingReset = false
 
-    init(settings: AppSettings, storeURL: URL? = ValidationModel.defaultStoreURL, initialStep: ValidationStep = .intro) {
-        _model = StateObject(wrappedValue: ValidationModel(settings: settings, storeURL: storeURL))
+    /// The model belongs to the app (one session, read from disk once at launch).
+    init(model: ValidationModel, initialStep: ValidationStep = .intro) {
+        self.model = model
         _step = State(initialValue: initialStep)
     }
 

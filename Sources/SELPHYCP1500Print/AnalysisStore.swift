@@ -1,12 +1,14 @@
 import Foundation
+import Observation
 
 /// The photos of the main window and the one shown in its preview, shared with the Statistics
 /// window: the main window publishes them, and choosing a photo in the statistics selects it in the
 /// main window too.
 @MainActor
-final class PhotoSelection: ObservableObject {
-    @Published var photos: [URL] = []
-    @Published var selected: URL?
+@Observable
+final class PhotoSelection {
+    var photos: [URL] = []
+    var selected: URL?
 }
 
 /// Results of the quick analysis (statistics row and intent result), kept for the whole session so

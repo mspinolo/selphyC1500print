@@ -79,7 +79,7 @@ final class PrintImageView: NSView {
 }
 
 @MainActor
-final class PrintService: ObservableObject {
+final class PrintService {
     enum PrintError: LocalizedError {
         case unreadable(URL)
 

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Observation
 
 /// Security-scoped bookmarks of files and folders the user chose (the app is sandboxed).
 enum Bookmarks {
@@ -201,15 +202,16 @@ struct ValidationSessionData: Codable, Equatable {
 
 /// Reads, changes and saves the assistant's session; does the work of each step.
 @MainActor
-final class ValidationModel: ObservableObject {
-    @Published var data: ValidationSessionData {
+@Observable
+final class ValidationModel {
+    var data: ValidationSessionData {
         didSet { if data != oldValue { save() } }
     }
-    @Published var busy: String?
-    @Published var message: String?
-    @Published var errorMessage: String?
-    @Published var report: String = ""
-    @Published var models: [ChartVariant: ScanSummary] = [:]
+    var busy: String?
+    var message: String?
+    var errorMessage: String?
+    var report: String = ""
+    var models: [ChartVariant: ScanSummary] = [:]
 
     let settings: AppSettings
     private let storeURL: URL?

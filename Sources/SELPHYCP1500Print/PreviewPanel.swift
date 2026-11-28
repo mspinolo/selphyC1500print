@@ -6,7 +6,7 @@ import AppKit
 /// with an adjustable scale, shadows the printer cannot reproduce, colours outside its gamut,
 /// Postcard layout). A model-based simulation from the printer profile, not a print proof.
 struct PreviewPanel: View {
-    @EnvironmentObject private var settings: AppSettings
+    @Environment(AppSettings.self) private var settings
     let photo: URL?
     let hasPhotos: Bool
 
@@ -172,8 +172,8 @@ struct PreviewPanel: View {
                 .help(tr("Zoom of the preview image (100% = one preview pixel per point). Scroll to move around."))
                 Spacer()
                 Menu {
-                    Toggle(tr("Simulate paper white"), isOn: $settings.simulatePaperWhite)
-                    Toggle(tr("Monitor black instead of printed black"), isOn: $settings.previewMonitorBlack)
+                    Toggle(tr("Simulate paper white"), isOn: Bindable(settings).simulatePaperWhite)
+                    Toggle(tr("Monitor black instead of printed black"), isOn: Bindable(settings).previewMonitorBlack)
                         .disabled(settings.simulatePaperWhite)
                 } label: {
                     Label(tr("Preview options"), systemImage: "slider.horizontal.3")
@@ -248,7 +248,7 @@ struct PreviewPanel: View {
             }
         case .layout:
             HStack(spacing: 10) {
-                Picker(tr("Image placement"), selection: $settings.printFit) {
+                Picker(tr("Image placement"), selection: Bindable(settings).printFit) {
                     ForEach(PrintFit.allCases) { fit in
                         Text(fit.title).tag(fit)
                     }
@@ -614,13 +614,14 @@ private struct ColorDetails: View {
 
 /// What is under the pointer, kept apart from the panel's state (see `PreviewPanel.pointer`).
 @MainActor
-final class PointerReadout: ObservableObject {
-    @Published var reading: PixelReading?
+@Observable
+final class PointerReadout {
+    var reading: PixelReading?
 }
 
 /// The colour under the pointer: what the photo should look like and what the model predicts in print.
 private struct ReadoutLine: View {
-    @ObservedObject var pointer: PointerReadout
+    let pointer: PointerReadout
 
     var body: some View {
         Group {

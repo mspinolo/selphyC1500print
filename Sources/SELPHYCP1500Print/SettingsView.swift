@@ -4,7 +4,7 @@ import AppKit
 /// The Settings window (⌘,): profile, rendering intent and black point compensation, language,
 /// print notice. The rendering intent is the same setting as the picker in the main window.
 struct SettingsView: View {
-    @EnvironmentObject private var settings: AppSettings
+    @Environment(AppSettings.self) private var settings
     @State private var showingProfilePicker = false
     @State private var profileReport: ICCProfileReport?
     @State private var profileMessage: String?
@@ -62,7 +62,7 @@ struct SettingsView: View {
             }
 
             Section(tr("Colour management")) {
-                Picker(tr("Rendering intent"), selection: $settings.renderingIntent) {
+                Picker(tr("Rendering intent"), selection: Bindable(settings).renderingIntent) {
                     ForEach(RenderingIntent.allCases) { intent in
                         Text(intent.title).tag(intent)
                     }
@@ -72,7 +72,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 Toggle(
                     tr("Black point compensation (BPC)"),
-                    isOn: blackPointCompensationForced ? .constant(true) : $settings.blackPointCompensation
+                    isOn: blackPointCompensationForced ? .constant(true) : Bindable(settings).blackPointCompensation
                 )
                 .disabled(blackPointCompensationForced)
                 if blackPointCompensationForced {
@@ -113,12 +113,12 @@ struct SettingsView: View {
             }
 
             Section(tr("General")) {
-                Picker(tr("Language"), selection: $settings.language) {
+                Picker(tr("Language"), selection: Bindable(settings).language) {
                     ForEach(AppLanguage.allCases) { language in
                         Text(language.nativeName).tag(language)
                     }
                 }
-                Picker(tr("Interface theme"), selection: $settings.theme) {
+                Picker(tr("Interface theme"), selection: Bindable(settings).theme) {
                     ForEach(AppTheme.allCases) { theme in
                         Text(theme.title).tag(theme)
                     }

@@ -4,9 +4,10 @@ import AppKit
 
 /// Progress of a conversion batch, updated from a background thread through the main queue.
 @MainActor
-final class ConversionProgress: ObservableObject {
-    @Published var completed = 0
-    @Published var total = 0
+@Observable
+final class ConversionProgress {
+    var completed = 0
+    var total = 0
 
     nonisolated func update(completed: Int, total: Int) {
         DispatchQueue.main.async { [weak self] in
@@ -19,8 +20,8 @@ final class ConversionProgress: ObservableObject {
 }
 
 struct ContentView: View {
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var selection: PhotoSelection
+    @Environment(AppSettings.self) private var settings
+    @Environment(PhotoSelection.self) private var selection
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarVisible") private var sidebarVisible = true
@@ -29,14 +30,14 @@ struct ContentView: View {
     @State private var access = PhotoAccess()
     @State private var showingPhotoPicker = false
     @State private var generatedCopies: [URL] = []
-    @StateObject private var printService = PrintService()
+    @State private var printService = PrintService()
     @State private var isPrinting = false
     @State private var generatedFolder: URL?
     @State private var generatedSummary = ""
     @State private var showingSaveFolderPicker = false
     @State private var savedFolder: URL?
     @State private var isPreparing = false
-    @StateObject private var progress = ConversionProgress()
+    @State private var progress = ConversionProgress()
     @State private var conversionWork: Task<ColorCorrectionService.Result, Error>?
     /// nil = the initial hint, so that it follows the selected language.
     @State private var statusOverride: String?
@@ -206,7 +207,7 @@ struct ContentView: View {
                 .font(.caption)
             }
             HStack(spacing: 10) {
-                Picker(tr("Image placement"), selection: $settings.printFit) {
+                Picker(tr("Image placement"), selection: Bindable(settings).printFit) {
                     ForEach(PrintFit.allCases) { fit in
                         Text(fit.title).tag(fit)
                     }
@@ -264,7 +265,7 @@ struct ContentView: View {
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 10) {
-                Picker(tr("Rendering intent"), selection: $settings.renderingIntent) {
+                Picker(tr("Rendering intent"), selection: Bindable(settings).renderingIntent) {
                     ForEach(RenderingIntent.allCases) { intent in
                         Text(intent.title).tag(intent)
                     }
@@ -272,7 +273,7 @@ struct ContentView: View {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 260)
                 .help(settings.renderingIntent.explanation)
-                Picker(tr("Output file format"), selection: $settings.outputFormat) {
+                Picker(tr("Output file format"), selection: Bindable(settings).outputFormat) {
                     ForEach(OutputFormat.allCases) { format in
                         Text(format.title).tag(format)
                     }

@@ -159,32 +159,32 @@ final class WindowTests: XCTestCase {
         let selection = PhotoSelection()
 
         UserDefaults.standard.set(true, forKey: "sidebarVisible")
-        try snapshot(ContentView().environmentObject(settings).environmentObject(selection), size: size, name: "1-empty-en", wait: 1, to: out)
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "2-photos-en", to: out)
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "3-photos-en-dark", dark: true, to: out)
+        try snapshot(ContentView().environment(settings).environment(selection), size: size, name: "1-empty-en", wait: 1, to: out)
+        try snapshot(ContentView(initialPhotos: files).environment(settings).environment(selection), size: size, name: "2-photos-en", to: out)
+        try snapshot(ContentView(initialPhotos: files).environment(settings).environment(selection), size: size, name: "3-photos-en-dark", dark: true, to: out)
         UserDefaults.standard.set(false, forKey: "sidebarVisible")
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "4-sidebar-hidden-en", to: out)
+        try snapshot(ContentView(initialPhotos: files).environment(settings).environment(selection), size: size, name: "4-sidebar-hidden-en", to: out)
         UserDefaults.standard.set(true, forKey: "sidebarVisible")
         settings.language = .italian
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size, name: "5-photos-it", to: out)
-        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 680), name: "6-settings-it", wait: 1, to: out)
+        try snapshot(ContentView(initialPhotos: files).environment(settings).environment(selection), size: size, name: "5-photos-it", to: out)
+        try snapshot(SettingsView().environment(settings), size: CGSize(width: 540, height: 680), name: "6-settings-it", wait: 1, to: out)
         settings.language = .english
-        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 680), name: "7-settings-en", wait: 1, to: out)
+        try snapshot(SettingsView().environment(settings), size: CGSize(width: 540, height: 680), name: "7-settings-en", wait: 1, to: out)
         let statistics = PhotoSelection()
         statistics.photos = files
         statistics.selected = files[0]
-        try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
+        try snapshot(StatisticsView().environment(settings).environment(statistics),
                      size: CGSize(width: 920, height: 760), name: "8-statistics-en", wait: 8, to: out)
-        try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
+        try snapshot(StatisticsView().environment(settings).environment(statistics),
                      size: CGSize(width: 920, height: 760), name: "9-statistics-en-dark", dark: true, wait: 4, to: out)
 
         // Neutral grey theme (darktable-like): built on the dark appearance.
         settings.theme = .neutralGrey
-        try snapshot(ContentView(initialPhotos: files).environmentObject(settings).environmentObject(selection), size: size,
+        try snapshot(ContentView(initialPhotos: files).environment(settings).environment(selection), size: size,
                      name: "10-photos-grey", dark: true, to: out)
-        try snapshot(StatisticsView().environmentObject(settings).environmentObject(statistics),
+        try snapshot(StatisticsView().environment(settings).environment(statistics),
                      size: CGSize(width: 920, height: 760), name: "11-statistics-grey", dark: true, wait: 4, to: out)
-        try snapshot(SettingsView().environmentObject(settings), size: CGSize(width: 540, height: 680),
+        try snapshot(SettingsView().environment(settings), size: CGSize(width: 540, height: 680),
                      name: "12-settings-grey", dark: true, wait: 1, to: out)
         settings.theme = .system
 
@@ -193,10 +193,10 @@ final class WindowTests: XCTestCase {
         full.autoHidesHUD = false
         full.backingScale = 1
         full.start()
-        try snapshot(FullScreenView(model: full).environmentObject(settings), size: CGSize(width: 1280, height: 800),
+        try snapshot(FullScreenView(model: full).environment(settings), size: CGSize(width: 1280, height: 800),
                      name: "13-fullscreen-compare", dark: true, wait: 8, to: out)
         full.handle(.toggleSideBySide)
-        try snapshot(FullScreenView(model: full).environmentObject(settings), size: CGSize(width: 1280, height: 800),
+        try snapshot(FullScreenView(model: full).environment(settings), size: CGSize(width: 1280, height: 800),
                      name: "14-fullscreen-side-by-side", dark: true, wait: 2, to: out)
         full.stop()
 
@@ -218,9 +218,9 @@ final class WindowTests: XCTestCase {
 
         // The print validation assistant: introduction and choice of the ColorChecker edition.
         let store = out.appendingPathComponent("validation-session.json")
-        try snapshot(ValidationAssistantView(settings: settings, storeURL: store, initialStep: .intro).environmentObject(settings),
+        try snapshot(ValidationAssistantView(model: ValidationModel(settings: settings, storeURL: store), initialStep: .intro).environment(settings),
                      size: CGSize(width: 1040, height: 760), name: "16-validation-intro-en", wait: 1, to: out)
-        try snapshot(ValidationAssistantView(settings: settings, storeURL: store, initialStep: .reference).environmentObject(settings),
+        try snapshot(ValidationAssistantView(model: ValidationModel(settings: settings, storeURL: store), initialStep: .reference).environment(settings),
                      size: CGSize(width: 1040, height: 900), name: "17-validation-reference-en", wait: 1, to: out)
         try? FileManager.default.removeItem(at: store)
 
