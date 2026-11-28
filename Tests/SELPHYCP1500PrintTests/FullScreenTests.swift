@@ -241,5 +241,19 @@ final class FullScreenTests: XCTestCase {
         let stages = session.timings.sorted { $0.key < $1.key }.map { String(format: "%@=%.2f", $0.key, $0.value) }.joined(separator: " ")
         print(String(format: "Preview check timing full-res 6000x4000: %.2f s; stages %@; %d cores",
                      elapsed, stages, ProcessInfo.processInfo.activeProcessorCount))
+
+        // The path of the full-screen view: one layer at a time, the needed one first.
+        let screen = PreviewSession(corrections: 2, transforms: 2, renders: 2)
+        var delivered: [(PreviewSession.FullLayer, TimeInterval)] = []
+        let layersStart = Date()
+        try screen.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options,
+                                        order: [.corrected, .uncorrected, .original]) { layer, image in
+            XCTAssertEqual(image.width, 6000)
+            delivered.append((layer, Date().timeIntervalSince(layersStart)))
+        }
+        XCTAssertEqual(delivered.map(\.0), [.corrected, .uncorrected, .original])
+        let layerStages = screen.timings.sorted { $0.key < $1.key }.map { String(format: "%@=%.2f", $0.key, $0.value) }.joined(separator: " ")
+        print(String(format: "Preview check timing full-screen layers 6000x4000: corrected after %.2f s, uncorrected %.2f s, original %.2f s; stages %@",
+                     delivered[0].1, delivered[1].1, delivered[2].1, layerStages))
     }
 }

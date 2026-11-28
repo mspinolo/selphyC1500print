@@ -425,12 +425,17 @@ final class PreviewSession: Sendable {
     }
 
     private func decode(sourceURL: URL, maxDimension: Int) throws -> DecodedSource {
-        let loaded = try ColorCorrectionService.loadSource(from: sourceURL, maxDimension: maxDimension)
+        let loaded = try timed("decode") { try ColorCorrectionService.loadSource(from: sourceURL, maxDimension: maxDimension) }
         let (width, height) = ColorCorrectionService.orientedSize(
             width: loaded.width, height: loaded.height, orientation: loaded.orientation
         )
         // Uncorrected device values. A source with its own profile is converted to sRGB first,
         // like at export; for a source that is already sRGB the decoded pixels are reused.
+        let sRGBDevice: Data = try timed("sRGB copy") { try sRGBCopy(of: loaded, sourceURL: sourceURL, maxDimension: maxDimension) }
+        return DecodedSource(loaded: loaded, width: width, height: height, sRGBDevice: sRGBDevice)
+    }
+
+    private func sRGBCopy(of loaded: ColorCorrectionService.LoadedSource, sourceURL: URL, maxDimension: Int) throws -> Data {
         let sRGBDevice: Data
         if loaded.embeddedICC == nil {
             sRGBDevice = try ColorCorrectionService.convertRGBX16Pixels(
@@ -446,7 +451,7 @@ final class PreviewSession: Sendable {
                 transform: nil, orientation: converted.orientation
             )
         }
-        return DecodedSource(loaded: loaded, width: width, height: height, sRGBDevice: sRGBDevice)
+        return sRGBDevice
     }
 
     private func correct(
@@ -460,10 +465,12 @@ final class PreviewSession: Sendable {
             intent: intent,
             blackPointCompensation: blackPointCompensation
         )
-        let correctedDevice = try ColorCorrectionService.convertRGBX16Pixels(
-            loaded.pixels, width: loaded.width, height: loaded.height,
-            transform: correctionTransform, orientation: loaded.orientation
-        )
+        let correctedDevice = try timed("convert") {
+            try ColorCorrectionService.convertRGBX16Pixels(
+                loaded.pixels, width: loaded.width, height: loaded.height,
+                transform: correctionTransform, orientation: loaded.orientation
+            )
+        }
         let analysis = try timed("analysis") {
             try PreviewService.analyse(
                 printerICC: printerICC, srgbRGBX: decoded.sRGBDevice, deviceRGBX: correctedDevice,

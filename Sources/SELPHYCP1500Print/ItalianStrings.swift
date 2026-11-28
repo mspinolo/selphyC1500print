@@ -10,7 +10,6 @@ enum ItalianStrings {
         "Cannot be read": "Illeggibile",
         "Close": "Chiudi",
         "The saved validation session could not be read, so a new one was started. The old file was kept as “%@”.": "Non è stato possibile leggere la sessione di validazione salvata, quindi ne è stata avviata una nuova. Il vecchio file è stato conservato come “%@”.",
-        "The saved validation session could not be read, so a new one was started.": "Non è stato possibile leggere la sessione di validazione salvata, quindi ne è stata avviata una nuova.",
         "The saved validation session could not be read and could not be set aside, so nothing will be saved until “%@” is moved away.": "Non è stato possibile leggere la sessione di validazione salvata né metterla da parte: non verrà salvato nulla finché “%@” non viene spostato.",
         "The validation session could not be saved: %@": "Non è stato possibile salvare la sessione di validazione: %@",
         "Select an ICC profile and one or more photos (JPEG, JPEG XL, PNG, TIFF).": "Seleziona un profilo ICC e una o più fotografie (JPEG, JPEG XL, PNG, TIFF).",
