@@ -13,9 +13,13 @@ final class HostedView {
     struct Node {
         let object: NSObject
         let role: String
+        /// Label, title, value and help; for a control without its own label, also the text just
+        /// before it (a Form row: "Language" [English ▾], "Show the notice…" [switch]).
         let texts: [String]
         let enabled: Bool
         let depth: Int
+        /// The current value of a pop-up menu or switch.
+        let value: String?
 
         func matches(_ text: String) -> Bool { texts.contains(text) }
         func mentions(_ text: String) -> Bool { texts.contains { $0.contains(text) } }
@@ -149,12 +153,20 @@ final class HostedView {
     func nodes() -> [Node] {
         var result: [Node] = []
         var seen = Set<ObjectIdentifier>()
-        func visit(_ object: NSObject, depth: Int) {
+        func visit(_ object: NSObject, depth: Int, precedingText: String?) {
             guard depth < 60, seen.insert(ObjectIdentifier(object)).inserted else { return }
             let role = Self.string(object, "accessibilityRole") ?? ""
             var texts: [String] = []
             for key in ["accessibilityLabel", "accessibilityTitle", "accessibilityValue", "accessibilityHelp"] {
                 if let text = Self.string(object, key), !text.isEmpty { texts.append(text) }
+            }
+            var value: String?
+            if object.responds(to: NSSelectorFromString("accessibilityValue")) {
+                let raw = object.value(forKey: "accessibilityValue")
+                value = (raw as? String) ?? (raw as? NSNumber).map { $0.stringValue }
+            }
+            if Self.controlRoles.contains(role), let precedingText, !texts.contains(precedingText) {
+                texts.append(precedingText)
             }
             if let control = object as? NSButton, !control.title.isEmpty { texts.append(control.title) }
             if let field = object as? NSTextField, !field.stringValue.isEmpty { texts.append(field.stringValue) }
@@ -163,13 +175,19 @@ final class HostedView {
                 enabled = (object.value(forKey: "accessibilityEnabled") as? Bool) ?? true
             }
             if let control = object as? NSControl { enabled = enabled && control.isEnabled }
-            result.append(Node(object: object, role: role, texts: texts, enabled: enabled, depth: depth))
-            for child in Self.children(of: object) { visit(child, depth: depth + 1) }
-            if let view = object as? NSView {
-                for subview in view.subviews { visit(subview, depth: depth + 1) }
+            result.append(Node(object: object, role: role, texts: texts, enabled: enabled, depth: depth, value: value))
+            var text: String?
+            for child in Self.children(of: object) + ((object as? NSView)?.subviews ?? []).map({ $0 as NSObject }) {
+                visit(child, depth: depth + 1, precedingText: text)
+                // The label of the next control: the last static text seen among the siblings.
+                if Self.string(child, "accessibilityRole") == NSAccessibility.Role.staticText.rawValue {
+                    text = Self.string(child, "accessibilityValue") ?? Self.string(child, "accessibilityLabel")
+                } else if Self.controlRoles.contains(Self.string(child, "accessibilityRole") ?? "") {
+                    text = nil
+                }
             }
         }
-        visit(host, depth: 0)
+        visit(host, depth: 0, precedingText: nil)
         return result
     }
 
@@ -206,39 +224,72 @@ final class HostedView {
         pump(0.3)
     }
 
-    /// Chooses `item` in the pop-up menu that offers it (a menu-style Picker), as a user would.
-    func choose(_ item: String, file: StaticString = #filePath, line: UInt = #line) {
-        guard let popUp = popUps().first(where: { $0.itemTitles.contains(item) }) else {
-            XCTFail("No pop-up menu offers “\(item)”. Tree:\n\(dump())", file: file, line: line)
-            return
+    /// The pop-up menus (menu-style pickers) of the window.
+    func popUpMenus() -> [Node] { nodes().filter { $0.role == NSAccessibility.Role.popUpButton.rawValue } }
+
+    /// The value shown by the pop-up menu labelled `label` (its selected item).
+    func value(of label: String) -> String? {
+        popUpMenus().first { $0.matches(label) }?.value
+            ?? nodes().first { Self.controlRoles.contains($0.role) && $0.matches(label) }?.value
+    }
+
+    private final class MenuPick: @unchecked Sendable {
+        var opened = false
+        var picked = false
+        var offered: [String] = []
+    }
+
+    /// Opens a pop-up menu as a person does (press) and, in the menu that appears, picks `item`;
+    /// closes the menu without choosing if it does not offer it. Returns whether it was picked.
+    private func pick(_ item: String, in popUp: Node) -> Bool {
+        let state = MenuPick()
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main
+        ) { note in
+            nonisolated(unsafe) let menu = note.object as? NSMenu
+            MainActor.assumeIsolated {
+                guard let menu, !state.opened else { return }
+                state.opened = true
+                state.offered = menu.items.map(\.title)
+                // Inside the menu's own event loop: pick, then close.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        if let index = menu.items.firstIndex(where: { $0.title == item && $0.isEnabled }) {
+                            menu.cancelTrackingWithoutAnimation()
+                            menu.performActionForItem(at: index)
+                            state.picked = true
+                        } else {
+                            menu.cancelTrackingWithoutAnimation()
+                        }
+                    }
+                }
+                // Never leave a menu open (it would block the test).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    MainActor.assumeIsolated { menu.cancelTracking() }
+                }
+            }
         }
-        popUp.selectItem(withTitle: item)
-        if let action = popUp.action { NSApp.sendAction(action, to: popUp.target, from: popUp) }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        _ = (popUp.object as AnyObject).accessibilityPerformPress?()
+        waitUntil(timeout: 4) { state.picked || (state.opened && !state.offered.contains(item)) }
         pump(0.3)
+        return state.picked
     }
 
-    /// The selected item of the pop-up menu that offers `item` among its choices.
-    func popUpSelection(offering item: String) -> String? {
-        if let popUp = popUps().first(where: { $0.itemTitles.contains(item) }) {
-            return popUp.titleOfSelectedItem
+    /// Chooses `item` in the pop-up menu that offers it (a menu-style Picker), as a person would:
+    /// open the menu, click the item.
+    func choose(_ item: String, file: StaticString = #filePath, line: UInt = #line) {
+        let menus = popUpMenus()
+        // The menu already showing the item first, then the others.
+        for popUp in menus.sorted(by: { ($0.value == item ? 0 : 1) < ($1.value == item ? 0 : 1) }) {
+            if pick(item, in: popUp) { return }
         }
-        return nil
-    }
-
-    /// The pop-up buttons (menu-style pickers) in the window.
-    func popUps() -> [NSPopUpButton] {
-        var found: [NSPopUpButton] = []
-        func visit(_ view: NSView) {
-            if let popUp = view as? NSPopUpButton { found.append(popUp) }
-            view.subviews.forEach(visit)
-        }
-        visit(host)
-        return found
+        XCTFail("No pop-up menu offers “\(item)” (menus: \(menus.map(\.texts))). Tree:\n\(dump())", file: file, line: line)
     }
 
     func dump(limit: Int = 400) -> String {
         nodes().prefix(limit).map { node in
-            String(repeating: " ", count: min(node.depth, 30)) + "\(node.role) \(node.texts)\(node.enabled ? "" : " [disabled]")"
+            String(repeating: " ", count: min(node.depth, 30)) + "\(node.role) \(node.texts)\(node.value.map { " = \($0)" } ?? "")\(node.enabled ? "" : " [disabled]")"
         }.joined(separator: "\n")
     }
 }
@@ -367,9 +418,9 @@ final class InterfaceTests: XCTestCase {
         XCTAssertEqual(settings.outputFormat, .jpeg)
         // Setting (changed elsewhere, e.g. in Settings or Statistics) -> menu.
         settings.renderingIntent = .relativeColorimetric
-        XCTAssertTrue(window.waitUntil { window.popUpSelection(offering: relative) == relative }, window.dump())
+        XCTAssertTrue(window.waitUntil { window.value(of: tr("Rendering intent")) == relative }, window.dump())
         settings.outputFormat = .png
-        XCTAssertTrue(window.waitUntil { window.popUpSelection(offering: OutputFormat.png.title) == OutputFormat.png.title })
+        XCTAssertTrue(window.waitUntil { window.value(of: tr("Output file format")) == OutputFormat.png.title })
     }
 
     func testThePreviewViewMenuSwitchesTheView() throws {
@@ -457,11 +508,11 @@ final class InterfaceTests: XCTestCase {
         defer { window.close() }
         XCTAssertTrue(window.waitUntil(timeout: 30) { photos.allSatisfy { window.shows($0.lastPathComponent) } },
                       window.dump())
-        XCTAssertEqual(window.popUpSelection(offering: photos[2].lastPathComponent), photos[0].lastPathComponent)
+        XCTAssertEqual(window.value(of: tr("Photo")), photos[0].lastPathComponent, window.dump())
 
         // Selecting elsewhere (main window) -> the statistics follow.
         selection.selected = photos[2]
-        XCTAssertTrue(window.waitUntil { window.popUpSelection(offering: photos[0].lastPathComponent) == photos[2].lastPathComponent },
+        XCTAssertTrue(window.waitUntil { window.value(of: tr("Photo")) == photos[2].lastPathComponent },
                       window.dump())
         // Choosing here -> the main window follows.
         window.choose(photos[1].lastPathComponent)
