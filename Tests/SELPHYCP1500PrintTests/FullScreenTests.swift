@@ -217,6 +217,17 @@ final class FullScreenTests: XCTestCase {
         let fresh = PreviewSession()
         try fresh.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options, order: [.original]) { _, _ in }
         XCTAssertEqual(fresh.counters.corrections, 0)
+        // One layer at a time: "with correction" alone makes no sRGB copy; asking afterwards for
+        // "without" adds it, without converting again.
+        let lazy = PreviewSession(corrections: 2, transforms: 2, renders: 2)
+        try lazy.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options, order: [.corrected]) { _, _ in }
+        XCTAssertNotNil(lazy.timings["convert"])
+        XCTAssertNil(lazy.timings["sRGB copy"], "not needed for the corrected view")
+        XCTAssertNil(lazy.timings["analysis"], "the full-screen view needs no statistics")
+        let convertTime = lazy.timings["convert"]
+        try lazy.fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options, order: [.uncorrected, .corrected]) { _, _ in }
+        XCTAssertNotNil(lazy.timings["sRGB copy"])
+        XCTAssertEqual(lazy.timings["convert"], convertTime, "the corrected values were kept")
         // Cancelled before starting: nothing delivered.
         var none = 0
         try PreviewSession().fullResolutionLayers(sourceURL: url, printerICC: profile, display: nil, options: options,

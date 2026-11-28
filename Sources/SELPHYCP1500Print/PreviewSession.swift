@@ -56,9 +56,7 @@ final class PreviewSession: Sendable {
         let height: Int
         let correctedDevice: Data
         let sRGBDevice: Data
-        /// The photo as the system shows it. Left out at full resolution, where the full-screen
-        /// view decodes it as a layer of its own (keeping it here too would mean a second decode
-        /// and a second copy of hundreds of MB).
+        /// The photo as the system shows it (nil if ImageIO cannot make it).
         let original: CGImage?
         let analysis: PreviewService.Analysis
         let heatMap: CGImage
@@ -92,6 +90,15 @@ final class PreviewSession: Sendable {
         let usedSRGBFallback: Bool
         let imageSpace: CGColorSpace
         let displayName: String
+    }
+
+    /// The device values of the full-screen layers at full resolution, each made only when a
+    /// layer needs it: the corrected values for "with correction", the sRGB copy for "without".
+    private struct FullBuffers {
+        let width: Int
+        let height: Int
+        var corrected: Data?
+        var sRGB: Data?
     }
 
     private struct LayerKey: Hashable {
@@ -140,6 +147,7 @@ final class PreviewSession: Sendable {
         var renders: LRU<RenderKey, RenderStage>
         /// Single full-resolution renderings of the full-screen view.
         var layers: LRU<LayerKey, CGImage>
+        var fullBuffers: LRU<CorrectionKey, FullBuffers>
         var counters = Counters()
         var timings: [String: Double] = [:]
     }
@@ -160,7 +168,8 @@ final class PreviewSession: Sendable {
             corrections: LRU(capacity: corrections),
             transforms: LRU(capacity: transforms),
             renders: LRU(capacity: renders),
-            layers: LRU(capacity: max(2, renders * 2))
+            layers: LRU(capacity: max(2, renders * 2)),
+            fullBuffers: LRU(capacity: corrections)
         ))
     }
 
@@ -171,6 +180,7 @@ final class PreviewSession: Sendable {
             $0.transforms.removeAll()
             $0.renders.removeAll()
             $0.layers.removeAll()
+            $0.fullBuffers.removeAll()
         }
     }
 
@@ -304,8 +314,10 @@ final class PreviewSession: Sendable {
     }
 
     /// The full-resolution layers of the full-screen view, in the order asked (the one on screen
-    /// first), each delivered as soon as it is ready. The original needs no correction and comes
-    /// straight from the file; the others share the correction stage and render one at a time.
+    /// first), each delivered as soon as it is ready. Each layer computes only what it needs: the
+    /// original comes straight from the file, "with correction" needs the printer conversion,
+    /// "without" the sRGB copy; the statistics of the preview (analysis, heat map) are not made.
+    /// Device values are kept per photo, so switching views does not convert again.
     func fullResolutionLayers(
         sourceURL: URL, printerICC: Data, display: PreviewService.Display?, options: PreviewService.Options,
         order: [FullLayer], isCancelled: () -> Bool = { false }, deliver: (FullLayer, CGImage) -> Void
@@ -324,8 +336,43 @@ final class PreviewSession: Sendable {
             simulatePaperWhite: options.simulatePaperWhite, blackPointCompensation: options.previewBlackPointCompensation)
         let renderKey = RenderKey(correction: correctionKey, transform: transformKey)
 
-        var correction: CorrectionStage?
         var transform: TransformStage?
+        // Decoded at most once per call, and only if a layer needs device values not yet cached.
+        var loaded: ColorCorrectionService.LoadedSource?
+        func decoded() throws -> ColorCorrectionService.LoadedSource {
+            if let loaded { return loaded }
+            let made = try timed("decode") { try ColorCorrectionService.loadSource(from: sourceURL, maxDimension: options.maxDimension) }
+            locked { $0.counters.corrections += 1 }
+            loaded = made
+            return made
+        }
+        /// The device values of `layer` (corrected, or the sRGB copy), from the cache or made now.
+        func buffers(for layer: FullLayer) throws -> (data: Data, width: Int, height: Int) {
+            let entry = locked { $0.fullBuffers.value(for: correctionKey) }
+            if let entry, let data = layer == .corrected ? entry.corrected : entry.sRGB {
+                return (data, entry.width, entry.height)
+            }
+            let source = try decoded()
+            let (width, height) = ColorCorrectionService.orientedSize(width: source.width, height: source.height, orientation: source.orientation)
+            let data: Data
+            if layer == .corrected {
+                let correctionTransform = try ColorCorrectionService.ColorTransform(
+                    sourceICC: source.embeddedICC, printerICC: printerICC,
+                    intent: options.intent, blackPointCompensation: options.blackPointCompensation)
+                data = try timed("convert") {
+                    try ColorCorrectionService.convertRGBX16Pixels(
+                        source.pixels, width: source.width, height: source.height,
+                        transform: correctionTransform, orientation: source.orientation)
+                }
+            } else {
+                data = try timed("sRGB copy") { try sRGBCopy(of: source, sourceURL: sourceURL, maxDimension: options.maxDimension) }
+            }
+            var updated = entry ?? FullBuffers(width: width, height: height)
+            if layer == .corrected { updated.corrected = data } else { updated.sRGB = data }
+            locked { $0.fullBuffers.insert(updated, for: correctionKey) }
+            return (data, width, height)
+        }
+
         for layer in order {
             if isCancelled() { return }
             let key = LayerKey(render: renderKey, layer: layer)
@@ -334,22 +381,18 @@ final class PreviewSession: Sendable {
                 continue
             }
             let image: CGImage
-            if layer == .original, let original = Self.originalImage(url: sourceURL, maxDimension: options.maxDimension) {
-                image = original
-            } else {
-                if correction == nil {
-                    if let cached = locked({ $0.corrections.value(for: correctionKey) }) {
-                        correction = cached
-                    } else {
-                        let made = try timed("correction") { try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options, includeOriginal: false) }
-                        locked {
-                            $0.counters.corrections += 1
-                            $0.corrections.insert(made, for: correctionKey)
-                        }
-                        correction = made
-                    }
+            switch layer {
+            case .original:
+                if let original = Self.originalImage(url: sourceURL, maxDimension: options.maxDimension) {
+                    image = original
+                } else {
+                    // ImageIO cannot show the file as it is: its sRGB numbers instead.
+                    let sRGB = try buffers(for: .uncorrected)
+                    image = try ColorCorrectionService.makeImage(
+                        rgbx: sRGB.data, width: sRGB.width, height: sRGB.height, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
                 }
-                if transform == nil, layer != .original {
+            case .uncorrected, .corrected:
+                if transform == nil {
                     if let cached = locked({ $0.transforms.value(for: transformKey) }) {
                         transform = cached
                     } else {
@@ -358,20 +401,14 @@ final class PreviewSession: Sendable {
                         transform = made
                     }
                 }
-                guard let correction else { continue }
+                guard let transform else { continue }
+                let device = try buffers(for: layer)
                 if isCancelled() { return }
-                switch layer {
-                case .original:
-                    image = try correction.originalOrFallback()
-                case .uncorrected, .corrected:
-                    guard let transform else { continue }
-                    let device = layer == .corrected ? correction.correctedDevice : correction.sRGBDevice
-                    let rendered = timed("render") {
-                        transform.transform.render(rgbx: device, width: correction.width, height: correction.height, countOutOfGamut: false)
-                    }
-                    image = try ColorCorrectionService.makeImage(
-                        rgbx: rendered.pixels, width: correction.width, height: correction.height, colorSpace: transform.imageSpace)
+                let rendered = timed("render") {
+                    transform.transform.render(rgbx: device.data, width: device.width, height: device.height, countOutOfGamut: false)
                 }
+                image = try ColorCorrectionService.makeImage(
+                    rgbx: rendered.pixels, width: device.width, height: device.height, colorSpace: transform.imageSpace)
             }
             locked { $0.layers.insert(image, for: key) }
             deliver(layer, image)
@@ -474,8 +511,7 @@ final class PreviewSession: Sendable {
         )
     }
 
-    private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options,
-                                   includeOriginal: Bool = true) throws -> CorrectionStage {
+    private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options) throws -> CorrectionStage {
         let decoded = try decode(sourceURL: sourceURL, maxDimension: options.maxDimension)
         let corrected = try correct(decoded, printerICC: printerICC, intent: options.intent,
                                     blackPointCompensation: options.blackPointCompensation)
@@ -485,7 +521,7 @@ final class PreviewSession: Sendable {
             correctedDevice: corrected.correctedDevice, sRGBDevice: decoded.sRGBDevice,
             // The file as the system shows it, in its own colour space (a wide-gamut source keeps
             // its colours); the sRGB numbers only if ImageIO cannot make it.
-            original: includeOriginal ? Self.originalImage(url: sourceURL, maxDimension: options.maxDimension) : nil,
+            original: Self.originalImage(url: sourceURL, maxDimension: options.maxDimension),
             analysis: analysis,
             heatMap: try PreviewService.makeHeatMap(deltaE: analysis.deltaEMap, width: analysis.width, height: analysis.height),
             sourceDescription: PreviewService.describe(decoded.loaded),
