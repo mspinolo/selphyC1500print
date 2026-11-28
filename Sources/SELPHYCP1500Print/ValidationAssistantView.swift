@@ -67,7 +67,11 @@ struct ValidationAssistantView: View {
                     HStack {
                         Label("\(index + 1). \(item.title)", systemImage: item.systemImage)
                         Spacer()
-                        if isDone(item) { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                        if isDone(item) {
+                            // Without a label VoiceOver reads the symbol as "Selected".
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                .accessibilityLabel(tr("Completed"))
+                        }
                     }
                     .tag(item)
                 }
@@ -153,6 +157,16 @@ struct ValidationAssistantView: View {
 
     @ViewBuilder
     private var statusBar: some View {
+        if let warning = model.storageWarning {
+            HStack(spacing: 8) {
+                Label(warning, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Spacer()
+            }
+            .font(.callout)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.bar)
+        }
         if model.busy != nil || model.message != nil || model.errorMessage != nil {
             HStack(spacing: 8) {
                 if let busy = model.busy {
@@ -239,6 +253,7 @@ struct ValidationAssistantView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    .accessibilityHidden(true)   // the choice is the button's "selected" trait
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(set.edition.capitalized(with: nil)).fontWeight(selected ? .semibold : .regular)
@@ -250,6 +265,7 @@ struct ValidationAssistantView: View {
             }
             .contentShape(Rectangle())
         }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .buttonStyle(.plain)
     }
 
@@ -610,6 +626,7 @@ struct ValidationAssistantView: View {
                             HStack(alignment: .top) {
                                 Image(systemName: gate.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
                                     .foregroundStyle(gate.passed ? Color.green : Color.red)
+                                    .accessibilityLabel(gate.passed ? tr("Passed") : tr("Not passed"))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(gate.name)
                                     Text(gate.detail).font(.caption).foregroundStyle(.secondary)

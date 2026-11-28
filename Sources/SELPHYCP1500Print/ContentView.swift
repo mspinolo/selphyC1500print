@@ -460,9 +460,7 @@ struct ContentView: View {
 
             progress.update(completed: 0, total: photoURLs.count)
             let batchProgress = progress
-            // Open access to the bookmarked profile before the conversion starts (it used to be
-            // opened afterwards, so the conversion could not read the profile in the sandbox).
-            let hasProfileAccess = profileURL.startAccessingSecurityScopedResource()
+            // prepareCopies opens the access to the bookmarked profile itself, before reading it.
             // A detached task is not cancelled with its parent: the handle is kept so that the
             // Annulla button can cancel the conversion itself.
             let work = Task.detached(priority: .userInitiated) {
@@ -480,12 +478,6 @@ struct ContentView: View {
             conversionWork = work
 
             Task {
-                defer {
-                    if hasProfileAccess {
-                        profileURL.stopAccessingSecurityScopedResource()
-                    }
-                }
-
                 do {
                     let result = try await work.value
 

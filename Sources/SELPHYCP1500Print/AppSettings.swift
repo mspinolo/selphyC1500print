@@ -190,6 +190,13 @@ final class AppSettings {
         profileDisplayName = url.lastPathComponent
     }
 
+    /// The bytes of the remembered printer profile, read with its sandbox access; nil when no
+    /// profile has been chosen.
+    func readProfile() throws -> Data? {
+        guard let url = try resolveProfileURL() else { return nil }
+        return try url.withSecurityScope { try Data(contentsOf: $0) }
+    }
+
     func resolveProfileURL() throws -> URL? {
         guard let profileBookmark else { return nil }
         var isStale = false

@@ -140,6 +140,7 @@ struct PreviewPanel: View {
     private func placeholder(_ text: String, symbol: String) -> some View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
+                .accessibilityHidden(true)
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
             Text(text)
@@ -389,10 +390,7 @@ struct PreviewPanel: View {
         isRendering = true
         defer { isRendering = false }
         do {
-            guard let profileURL = try settings.resolveProfileURL() else { return }
-            let hasAccess = profileURL.startAccessingSecurityScopedResource()
-            defer { if hasAccess { profileURL.stopAccessingSecurityScopedResource() } }
-            let printerICC = try Data(contentsOf: profileURL)
+            guard let printerICC = try settings.readProfile() else { return }
             let display = PreviewService.Display.current()
             var options = PreviewService.Options(
                 intent: settings.renderingIntent,

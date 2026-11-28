@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Synchronization
 
 /// The photos of the main window and the one shown in its preview, shared with the Statistics
 /// window: the main window publishes them, and choosing a photo in the statistics selects it in the
@@ -16,8 +17,8 @@ final class PhotoSelection {
 /// One entry per photo file (path and modification date), rendering intent, BPC and printer
 /// profile (content digest). Only the small results are kept, not the per-pixel maps.
 ///
-/// Thread-safe: the dictionary is guarded by a lock, the analysis runs outside it.
-final class AnalysisStore: @unchecked Sendable {
+/// Thread-safe: the dictionary is guarded by a mutex, the analysis runs outside it.
+final class AnalysisStore: Sendable {
     static let shared = AnalysisStore()
 
     struct Entry: Equatable, Sendable {
@@ -37,21 +38,22 @@ final class AnalysisStore: @unchecked Sendable {
     /// Beyond this many entries the store starts again from empty (each entry is a few hundred bytes).
     static let capacity = 3000
 
-    private let lock = NSLock()
-    private var storage: [Key: Entry] = [:]
-    private var _analysedPhotos = 0
+    private struct State {
+        var storage: [Key: Entry] = [:]
+        var analysedPhotos = 0
+    }
+
+    private let state = Mutex(State())
 
     /// How many times a photo was decoded and analysed (tests and diagnostics).
-    var analysedPhotos: Int { locked { _analysedPhotos } }
+    var analysedPhotos: Int { locked { $0.analysedPhotos } }
 
     init() {}
 
-    func removeAll() { locked { storage.removeAll() } }
+    func removeAll() { locked { $0.storage.removeAll() } }
 
-    private func locked<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
+    private func locked<T: Sendable>(_ body: (inout State) -> T) -> T {
+        state.withLock { body(&$0) }
     }
 
     /// The results of `url` for each of `intents`, in that order. Missing results are computed
@@ -67,7 +69,7 @@ final class AnalysisStore: @unchecked Sendable {
         let keys = intents.map {
             Key(path: url.path, modified: modified, intent: $0, blackPointCompensation: blackPointCompensation, profile: profileDigest)
         }
-        var found = locked { keys.map { storage[$0] } }
+        var found = locked { state in keys.map { state.storage[$0] } }
         let missing = intents.indices.filter { found[$0] == nil }
         guard !missing.isEmpty else { return found.map { $0! } }
 
@@ -84,10 +86,10 @@ final class AnalysisStore: @unchecked Sendable {
                 found[index] = entry
                 computed.append((keys[index], entry))
             }
-            locked {
-                _analysedPhotos += 1
-                if storage.count + computed.count > Self.capacity { storage.removeAll() }
-                for (key, entry) in computed { storage[key] = entry }
+            locked { state in
+                state.analysedPhotos += 1
+                if state.storage.count + computed.count > Self.capacity { state.storage.removeAll() }
+                for (key, entry) in computed { state.storage[key] = entry }
             }
         } catch {
             let failed = Entry(row: PhotoAnalysisRow(url: url, error: error.localizedDescription), result: nil)

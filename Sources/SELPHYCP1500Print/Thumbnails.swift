@@ -102,6 +102,8 @@ struct ThumbnailView: View {
             } else {
                 Image(systemName: failed ? "exclamationmark.triangle" : "photo")
                     .foregroundStyle(failed ? Color.orange : Color.secondary)
+                    .accessibilityLabel(failed ? tr("Cannot be read") : "")
+                    .accessibilityHidden(!failed)
             }
         }
         .frame(width: side, height: side)

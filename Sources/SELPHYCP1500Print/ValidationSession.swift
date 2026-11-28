@@ -14,12 +14,19 @@ enum Bookmarks {
         return try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
     }
 
+    /// A fresh bookmark when `data` is stale (the item was moved or renamed since it was chosen:
+    /// the system still finds it, but may stop doing so), nil when it is current or unresolvable.
+    static func renewed(_ data: Data) -> Data? {
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil,
+                                 bookmarkDataIsStale: &stale), stale else { return nil }
+        return url.withSecurityScope { try? make($0) }
+    }
+
     /// Runs `body` with access to the bookmarked file.
     static func withAccess<T>(_ data: Data?, _ body: (URL) throws -> T) throws -> T? {
         guard let url = resolve(data) else { return nil }
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        return try body(url)
+        return try url.withSecurityScope(body)
     }
 }
 
@@ -186,6 +193,54 @@ struct ValidationSessionData: Codable, Equatable {
     var visual: [VisualVerdict] = []
     var printerProfileDigest: Data?
 
+    /// Reads a session written by this or an older version: a field the file does not have (an
+    /// older version did not know it) keeps its default instead of making the whole file unreadable.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ValidationSessionData()
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) throws -> T {
+            try container.decodeIfPresent(T.self, forKey: key) ?? fallback
+        }
+        mode = try value(.mode, defaults.mode)
+        referenceID = try value(.referenceID, defaults.referenceID)
+        importedReference = try container.decodeIfPresent(ReferenceSet.self, forKey: .importedReference)
+        photos = try value(.photos, defaults.photos)
+        plan = try value(.plan, defaults.plan)
+        exportFolderName = try container.decodeIfPresent(String.self, forKey: .exportFolderName)
+        exportFolderBookmark = try container.decodeIfPresent(Data.self, forKey: .exportFolderBookmark)
+        exportedAt = try container.decodeIfPresent(Date.self, forKey: .exportedAt)
+        checklist = try value(.checklist, defaults.checklist)
+        record = try value(.record, defaults.record)
+        scannerProfileName = try container.decodeIfPresent(String.self, forKey: .scannerProfileName)
+        scannerProfileBookmark = try container.decodeIfPresent(Data.self, forKey: .scannerProfileBookmark)
+        colorCheckerScanName = try container.decodeIfPresent(String.self, forKey: .colorCheckerScanName)
+        colorCheckerScanBookmark = try container.decodeIfPresent(Data.self, forKey: .colorCheckerScanBookmark)
+        corners = try value(.corners, defaults.corners)
+        scannerCheck = try container.decodeIfPresent(ScannerCheckResult.self, forKey: .scannerCheck)
+        scans = try value(.scans, defaults.scans)
+        visual = try value(.visual, defaults.visual)
+        printerProfileDigest = try container.decodeIfPresent(Data.self, forKey: .printerProfileDigest)
+    }
+
+    init() {}
+
+    /// Renews every stale bookmark (photos, scans, folders, profiles); returns whether any changed.
+    mutating func renewStaleBookmarks() -> Bool {
+        var changed = false
+        func renew(_ bookmark: inout Data) {
+            if let fresh = Bookmarks.renewed(bookmark) { bookmark = fresh; changed = true }
+        }
+        func renewOptional(_ bookmark: inout Data?) {
+            if let current = bookmark, let fresh = Bookmarks.renewed(current) { bookmark = fresh; changed = true }
+        }
+        for index in photos.indices { renew(&photos[index].bookmark) }
+        for code in Array(scans.keys) { if var entry = scans[code] { renew(&entry.bookmark); scans[code] = entry } }
+        renewOptional(&exportFolderBookmark)
+        renewOptional(&scannerProfileBookmark)
+        renewOptional(&colorCheckerScanBookmark)
+        return changed
+    }
+
     var reference: ReferenceSet {
         if let importedReference, importedReference.id == referenceID { return importedReference }
         return ReferenceSet.builtIn(id: referenceID) ?? .default
@@ -210,22 +265,59 @@ final class ValidationModel {
     var busy: String?
     var message: String?
     var errorMessage: String?
+    /// A problem with the session file (unreadable, or not saved). Unlike `errorMessage` it is
+    /// not cleared by the next action: it stays until the problem is solved.
+    var storageWarning: String?
     var report: String = ""
     var models: [ChartVariant: ScanSummary] = [:]
 
     let settings: AppSettings
     private let storeURL: URL?
+    @ObservationIgnored private var saveFailed = false
+    /// Set when an unreadable session file could not be set aside: it is never overwritten.
+    @ObservationIgnored private var saveBlocked = false
 
     init(settings: AppSettings, storeURL: URL? = ValidationModel.defaultStoreURL) {
         self.settings = settings
         self.storeURL = storeURL
-        if let storeURL, let stored = try? Data(contentsOf: storeURL),
-           let decoded = try? JSONDecoder().decode(ValidationSessionData.self, from: stored) {
-            data = decoded
-        } else {
-            data = ValidationSessionData()
+        var loaded = ValidationSessionData()
+        var warning: String?
+        if let storeURL, FileManager.default.fileExists(atPath: storeURL.path) {
+            do {
+                loaded = try JSONDecoder().decode(ValidationSessionData.self, from: Data(contentsOf: storeURL))
+            } catch {
+                // Never overwrite a session that cannot be read: keep it aside and say so.
+                if let kept = Self.keepUnreadable(storeURL) {
+                    warning = trf("The saved validation session could not be read, so a new one was started. The old file was kept as “%@”.", kept)
+                } else {
+                    saveBlocked = true
+                    warning = trf("The saved validation session could not be read and could not be set aside, so nothing will be saved until “%@” is moved away.", storeURL.path)
+                }
+            }
         }
-        if data.visual.isEmpty { data.visual = PhotoRole.allCases.map { VisualVerdict(photoRole: $0.rawValue) } }
+        let renewed = loaded.renewStaleBookmarks()
+        if loaded.visual.isEmpty { loaded.visual = PhotoRole.allCases.map { VisualVerdict(photoRole: $0.rawValue) } }
+        data = loaded
+        storageWarning = warning
+        if renewed { save() }
+    }
+
+    /// Moves an unreadable session file next to itself under a dated name; returns that name.
+    nonisolated static func keepUnreadable(_ url: URL, now: Date = Date()) -> String? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let base = url.deletingPathExtension().lastPathComponent + "-unreadable-" + formatter.string(from: now)
+        var target = url.deletingLastPathComponent().appendingPathComponent(base + ".json")
+        var counter = 2
+        while FileManager.default.fileExists(atPath: target.path) {
+            target = url.deletingLastPathComponent().appendingPathComponent("\(base)-\(counter).json")
+            counter += 1
+        }
+        if (try? FileManager.default.moveItem(at: url, to: target)) != nil { return target.lastPathComponent }
+        // Cannot move it (permissions): a copy is enough, the original is then replaced safely.
+        if (try? FileManager.default.copyItem(at: url, to: target)) != nil { return target.lastPathComponent }
+        return nil
     }
 
     nonisolated static var defaultStoreURL: URL? {
@@ -236,8 +328,17 @@ final class ValidationModel {
     }
 
     private func save() {
-        guard let storeURL, let encoded = try? JSONEncoder().encode(data) else { return }
-        try? encoded.write(to: storeURL, options: .atomic)
+        guard let storeURL, !saveBlocked else { return }
+        do {
+            try JSONEncoder().encode(data).write(to: storeURL, options: .atomic)
+            if saveFailed {
+                saveFailed = false
+                storageWarning = nil
+            }
+        } catch {
+            saveFailed = true
+            storageWarning = trf("The validation session could not be saved: %@", error.localizedDescription)
+        }
     }
 
     func reset() {
@@ -247,15 +348,14 @@ final class ValidationModel {
         models = [:]
         message = nil
         errorMessage = nil
+        if !saveFailed { storageWarning = nil }
     }
 
     private func printerProfile() throws -> Data {
-        guard let url = try settings.resolveProfileURL() else {
+        guard let data = try settings.readProfile() else {
             throw ColorCorrectionService.CorrectionError.profileLoad(tr("Choose the printer ICC profile in Settings first."))
         }
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        return try Data(contentsOf: url)
+        return data
     }
 
     // MARK: Reference

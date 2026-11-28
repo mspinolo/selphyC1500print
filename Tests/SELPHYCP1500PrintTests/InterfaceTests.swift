@@ -584,6 +584,9 @@ final class InterfaceTests: XCTestCase {
         XCTAssertTrue(window.shows(ValidationStep.intro.title), window.dump())
         XCTAssertNil(window.control(tr("Back")))
         XCTAssertTrue(window.shows(tr("Choose the printer ICC profile in Settings first.")))
+        // The completed steps (the reference chart has a default) are announced as such, not as "Selected".
+        XCTAssertTrue(window.nodes().contains { $0.role == NSAccessibility.Role.image.rawValue && $0.matches(tr("Completed")) }, window.dump())
+        XCTAssertFalse(window.nodes().contains { $0.role == NSAccessibility.Role.image.rawValue && $0.matches("Selected") })
 
         window.press(tr("Next"))
         XCTAssertTrue(window.waitUntil { window.control(tr("Back")) != nil }, window.dump())

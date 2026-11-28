@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Synchronization
 
 /// Interface languages. English is the default; Italian can be selected in the app.
 enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
@@ -24,23 +25,22 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 ///
 /// Observable: every view that calls `tr`, `trf` or `trn` while it is drawn reads `language`, so
 /// it is redrawn when the language changes, and only those views. Usable from any thread (the
-/// value is guarded by a lock; the observation registrar is thread-safe).
-final class Localizer: Observable, @unchecked Sendable {
+/// value is guarded by a mutex; the observation registrar is thread-safe).
+final class Localizer: Observable, Sendable {
     static let shared = Localizer()
 
-    private let lock = NSLock()
-    private var current = AppLanguage.english
+    private let current = Mutex(AppLanguage.english)
     private let registrar = ObservationRegistrar()
 
     var language: AppLanguage {
         get {
             registrar.access(self, keyPath: \.language)
-            return lock.withLock { current }
+            return current.withLock { $0 }
         }
         set {
-            guard newValue != lock.withLock({ current }) else { return }
+            guard newValue != current.withLock({ $0 }) else { return }
             registrar.withMutation(of: self, keyPath: \.language) {
-                lock.withLock { current = newValue }
+                current.withLock { $0 = newValue }
             }
         }
     }

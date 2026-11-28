@@ -179,9 +179,7 @@ struct SettingsView: View {
     private func revealProfile() {
         do {
             guard let url = try settings.resolveProfileURL() else { return }
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+            url.withSecurityScope { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
         } catch {
             profileFailed = true
             profileMessage = trf("The remembered profile can no longer be read: %@", error.localizedDescription)
@@ -193,9 +191,7 @@ struct SettingsView: View {
         guard profileReport == nil, settings.profileBookmark != nil else { return }
         do {
             guard let url = try settings.resolveProfileURL() else { return }
-            let didStart = url.startAccessingSecurityScopedResource()
-            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-            profileReport = try ICCProfileInspector.inspect(url: url)
+            profileReport = try url.withSecurityScope { try ICCProfileInspector.inspect(url: $0) }
         } catch {
             profileFailed = true
             profileMessage = trf("The remembered profile can no longer be read: %@", error.localizedDescription)

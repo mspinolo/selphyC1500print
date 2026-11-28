@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import CoreGraphics
 import ImageIO
 import CryptoKit
@@ -19,9 +20,9 @@ enum ContentDigest {
 /// - preview transform, per (printer profile, display profile, paper-white and black options);
 /// - render stage: the two expected-print images, per correction stage and transform.
 ///
-/// Thread-safe: the caches are guarded by a lock, the heavy work runs outside it (two callers
+/// Thread-safe: the caches are guarded by a mutex, the heavy work runs outside it (two callers
 /// asking for the same missing stage at once may both compute it; the result is the same).
-final class PreviewSession: @unchecked Sendable {
+final class PreviewSession: Sendable {
     /// Counters for tests and diagnostics.
     struct Counters: Equatable {
         var corrections = 0
@@ -50,18 +51,21 @@ final class PreviewSession: @unchecked Sendable {
         let transform: TransformKey
     }
 
-    private final class CorrectionStage {
+    private final class CorrectionStage: Sendable {
         let width: Int
         let height: Int
         let correctedDevice: Data
         let sRGBDevice: Data
-        let original: CGImage
+        /// The photo as the system shows it. Left out at full resolution, where the full-screen
+        /// view decodes it as a layer of its own (keeping it here too would mean a second decode
+        /// and a second copy of hundreds of MB).
+        let original: CGImage?
         let analysis: PreviewService.Analysis
         let heatMap: CGImage
         let sourceDescription: String
         let effectiveBlackPointCompensation: Bool
 
-        init(width: Int, height: Int, correctedDevice: Data, sRGBDevice: Data, original: CGImage,
+        init(width: Int, height: Int, correctedDevice: Data, sRGBDevice: Data, original: CGImage?,
              analysis: PreviewService.Analysis, heatMap: CGImage, sourceDescription: String,
              effectiveBlackPointCompensation: Bool) {
             self.width = width
@@ -73,6 +77,13 @@ final class PreviewSession: @unchecked Sendable {
             self.heatMap = heatMap
             self.sourceDescription = sourceDescription
             self.effectiveBlackPointCompensation = effectiveBlackPointCompensation
+        }
+
+        /// The original, or the sRGB numbers of the file when ImageIO cannot make it.
+        func originalOrFallback() throws -> CGImage {
+            if let original { return original }
+            return try ColorCorrectionService.makeImage(
+                rgbx: sRGBDevice, width: width, height: height, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
         }
     }
 
@@ -123,18 +134,21 @@ final class PreviewSession: @unchecked Sendable {
         mutating func removeAll() { entries.removeAll() }
     }
 
-    private let lock = NSLock()
-    private var corrections: LRU<CorrectionKey, CorrectionStage>
-    private var transforms: LRU<TransformKey, TransformStage>
-    private var renders: LRU<RenderKey, RenderStage>
-    /// Single full-resolution renderings of the full-screen view.
-    private var layers: LRU<LayerKey, CGImage>
-    private var _counters = Counters()
-    private var _timings: [String: Double] = [:]
+    private struct State {
+        var corrections: LRU<CorrectionKey, CorrectionStage>
+        var transforms: LRU<TransformKey, TransformStage>
+        var renders: LRU<RenderKey, RenderStage>
+        /// Single full-resolution renderings of the full-screen view.
+        var layers: LRU<LayerKey, CGImage>
+        var counters = Counters()
+        var timings: [String: Double] = [:]
+    }
 
-    var counters: Counters { locked { _counters } }
+    private let state: Mutex<State>
+
+    var counters: Counters { locked { $0.counters } }
     /// Seconds spent in each stage the last time it was computed.
-    var timings: [String: Double] { locked { _timings } }
+    var timings: [String: Double] { locked { $0.timings } }
 
     /// The session of the interactive preview (reduced size), shared by the preview panel and
     /// the full-screen view.
@@ -142,33 +156,33 @@ final class PreviewSession: @unchecked Sendable {
 
     /// Capacities in entries; a full-resolution session keeps fewer (each entry can be hundreds of MB).
     init(corrections: Int = 3, transforms: Int = 6, renders: Int = 8) {
-        self.corrections = LRU(capacity: corrections)
-        self.transforms = LRU(capacity: transforms)
-        self.renders = LRU(capacity: renders)
-        self.layers = LRU(capacity: max(2, renders * 2))
+        state = Mutex(State(
+            corrections: LRU(capacity: corrections),
+            transforms: LRU(capacity: transforms),
+            renders: LRU(capacity: renders),
+            layers: LRU(capacity: max(2, renders * 2))
+        ))
     }
 
     /// Drops everything (e.g. when the printer profile is replaced and memory should be freed).
     func removeAll() {
         locked {
-            corrections.removeAll()
-            transforms.removeAll()
-            renders.removeAll()
-            layers.removeAll()
+            $0.corrections.removeAll()
+            $0.transforms.removeAll()
+            $0.renders.removeAll()
+            $0.layers.removeAll()
         }
     }
 
-    private func locked<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
+    private func locked<T: Sendable>(_ body: (inout State) -> T) -> T {
+        state.withLock { body(&$0) }
     }
 
     private func timed<T>(_ name: String, _ body: () throws -> T) rethrows -> T {
         let start = Date()
         let result = try body()
         let elapsed = Date().timeIntervalSince(start)
-        locked { _timings[name] = elapsed }
+        locked { $0.timings[name] = elapsed }
         return result
     }
 
@@ -199,47 +213,47 @@ final class PreviewSession: @unchecked Sendable {
         )
 
         let correction: CorrectionStage
-        if let cached = locked({ corrections.value(for: correctionKey) }) {
+        if let cached = locked({ $0.corrections.value(for: correctionKey) }) {
             correction = cached
         } else {
             correction = try timed("correction") {
                 try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options)
             }
             locked {
-                _counters.corrections += 1
-                corrections.insert(correction, for: correctionKey)
+                $0.counters.corrections += 1
+                $0.corrections.insert(correction, for: correctionKey)
             }
         }
 
         let transform: TransformStage
-        if let cached = locked({ transforms.value(for: transformKey) }) {
+        if let cached = locked({ $0.transforms.value(for: transformKey) }) {
             transform = cached
         } else {
             transform = try timed("transform") {
                 try computeTransform(printerICC: printerICC, display: display, options: options)
             }
             locked {
-                _counters.transforms += 1
-                transforms.insert(transform, for: transformKey)
+                $0.counters.transforms += 1
+                $0.transforms.insert(transform, for: transformKey)
             }
         }
 
         let renderKey = RenderKey(correction: correctionKey, transform: transformKey)
         let render: RenderStage
-        if let cached = locked({ renders.value(for: renderKey) }) {
+        if let cached = locked({ $0.renders.value(for: renderKey) }) {
             render = cached
         } else {
             render = try timed("render") {
                 try computeRender(correction: correction, transform: transform)
             }
             locked {
-                _counters.renders += 1
-                renders.insert(render, for: renderKey)
+                $0.counters.renders += 1
+                $0.renders.insert(render, for: renderKey)
             }
         }
 
         return PreviewService.Preview(
-            original: correction.original,
+            original: try correction.originalOrFallback(),
             uncorrected: render.uncorrected,
             corrected: render.corrected,
             outOfGamutFraction: render.outOfGamutFraction,
@@ -315,7 +329,7 @@ final class PreviewSession: @unchecked Sendable {
         for layer in order {
             if isCancelled() { return }
             let key = LayerKey(render: renderKey, layer: layer)
-            if let cached = locked({ layers.value(for: key) }) {
+            if let cached = locked({ $0.layers.value(for: key) }) {
                 deliver(layer, cached)
                 continue
             }
@@ -324,23 +338,23 @@ final class PreviewSession: @unchecked Sendable {
                 image = original
             } else {
                 if correction == nil {
-                    if let cached = locked({ corrections.value(for: correctionKey) }) {
+                    if let cached = locked({ $0.corrections.value(for: correctionKey) }) {
                         correction = cached
                     } else {
-                        let made = try timed("correction") { try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options) }
+                        let made = try timed("correction") { try computeCorrection(sourceURL: sourceURL, printerICC: printerICC, options: options, includeOriginal: false) }
                         locked {
-                            _counters.corrections += 1
-                            corrections.insert(made, for: correctionKey)
+                            $0.counters.corrections += 1
+                            $0.corrections.insert(made, for: correctionKey)
                         }
                         correction = made
                     }
                 }
                 if transform == nil, layer != .original {
-                    if let cached = locked({ transforms.value(for: transformKey) }) {
+                    if let cached = locked({ $0.transforms.value(for: transformKey) }) {
                         transform = cached
                     } else {
                         let made = try timed("transform") { try computeTransform(printerICC: printerICC, display: display, options: options) }
-                        locked { transforms.insert(made, for: transformKey) }
+                        locked { $0.transforms.insert(made, for: transformKey) }
                         transform = made
                     }
                 }
@@ -348,7 +362,7 @@ final class PreviewSession: @unchecked Sendable {
                 if isCancelled() { return }
                 switch layer {
                 case .original:
-                    image = correction.original
+                    image = try correction.originalOrFallback()
                 case .uncorrected, .corrected:
                     guard let transform else { continue }
                     let device = layer == .corrected ? correction.correctedDevice : correction.sRGBDevice
@@ -359,7 +373,7 @@ final class PreviewSession: @unchecked Sendable {
                         rgbx: rendered.pixels, width: correction.width, height: correction.height, colorSpace: transform.imageSpace)
                 }
             }
-            locked { layers.insert(image, for: key) }
+            locked { $0.layers.insert(image, for: key) }
             deliver(layer, image)
         }
     }
@@ -463,19 +477,18 @@ final class PreviewSession: @unchecked Sendable {
         )
     }
 
-    private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options) throws -> CorrectionStage {
+    private func computeCorrection(sourceURL: URL, printerICC: Data, options: PreviewService.Options,
+                                   includeOriginal: Bool = true) throws -> CorrectionStage {
         let decoded = try decode(sourceURL: sourceURL, maxDimension: options.maxDimension)
         let corrected = try correct(decoded, printerICC: printerICC, intent: options.intent,
                                     blackPointCompensation: options.blackPointCompensation)
         let analysis = corrected.analysis
-        let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
         return CorrectionStage(
             width: decoded.width, height: decoded.height,
             correctedDevice: corrected.correctedDevice, sRGBDevice: decoded.sRGBDevice,
             // The file as the system shows it, in its own colour space (a wide-gamut source keeps
             // its colours); the sRGB numbers only if ImageIO cannot make it.
-            original: try Self.originalImage(url: sourceURL, maxDimension: options.maxDimension)
-                ?? ColorCorrectionService.makeImage(rgbx: decoded.sRGBDevice, width: decoded.width, height: decoded.height, colorSpace: sRGB),
+            original: includeOriginal ? Self.originalImage(url: sourceURL, maxDimension: options.maxDimension) : nil,
             analysis: analysis,
             heatMap: try PreviewService.makeHeatMap(deltaE: analysis.deltaEMap, width: analysis.width, height: analysis.height),
             sourceDescription: PreviewService.describe(decoded.loaded),

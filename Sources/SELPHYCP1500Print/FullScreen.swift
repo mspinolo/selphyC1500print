@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import SwiftUI
+import Synchronization
 
 // Full-screen view: the photo at full resolution on darktable's middle grey, opened on request
 // (toolbar button, View menu, Shift-Cmd-F) and closed with Esc. Nothing is computed until it is
@@ -293,12 +294,10 @@ final class FullScreenModel {
     }
 
     private func printerProfile() throws -> Data {
-        guard let url = try settings.resolveProfileURL() else {
+        guard let data = try settings.readProfile() else {
             throw ColorCorrectionService.CorrectionError.profileLoad(tr("Choose the ICC profile to see the preview."))
         }
-        let hasAccess = url.startAccessingSecurityScopedResource()
-        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-        return try Data(contentsOf: url)
+        return data
     }
 
     /// Shows the reduced preview at once (usually already computed by the preview panel), then
@@ -382,11 +381,10 @@ final class FullScreenModel {
 }
 
 /// A flag a background computation checks between steps.
-final class CancellationFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = false
-    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
-    func set() { lock.lock(); value = true; lock.unlock() }
+final class CancellationFlag: Sendable {
+    private let value = Mutex(false)
+    var isSet: Bool { value.withLock { $0 } }
+    func set() { value.withLock { $0 = true } }
 }
 
 /// A borderless window that can take the keyboard.
@@ -609,6 +607,7 @@ struct FullScreenView: View {
                 Button { model.close() } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 26))
                 }
+                .accessibilityLabel(tr("Close"))
                 .buttonStyle(.plain)
                 .foregroundStyle(.white.opacity(0.85))
                 .help(tr("Close (Esc)"))

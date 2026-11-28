@@ -249,6 +249,7 @@ struct StatisticsView: View {
     private var placeholder: some View {
         VStack(spacing: 10) {
             Image(systemName: "chart.bar")
+                .accessibilityHidden(true)
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
             Text(tr("Add photos in the main window to see their statistics."))
@@ -473,6 +474,8 @@ struct StatisticsView: View {
                             GridRow {
                                 Image(systemName: isBest ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(isBest ? Color.green : Color.secondary.opacity(0.4))
+                                    .accessibilityLabel(isBest ? tr("Best") : "")
+                                    .accessibilityHidden(!isBest)
                                 HStack(spacing: 4) {
                                     Text(result.intent.title).fontWeight(weight)
                                     if result.intent == settings.renderingIntent {
@@ -539,15 +542,12 @@ struct StatisticsView: View {
 
     private func loadProfile() {
         do {
-            guard let url = try settings.resolveProfileURL() else {
+            guard let data = try settings.readProfile() else {
                 printerICC = nil
                 profileDigest = nil
                 errorMessage = tr("Choose the ICC profile to see the preview.")
                 return
             }
-            let hasAccess = url.startAccessingSecurityScopedResource()
-            defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: url)
             printerICC = data
             profileDigest = ContentDigest.of(data)
             errorMessage = nil

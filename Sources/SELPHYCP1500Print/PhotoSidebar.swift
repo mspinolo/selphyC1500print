@@ -29,6 +29,7 @@ struct PhotoSidebar: View {
             if photos.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "square.and.arrow.down.on.square")
+                        .accessibilityHidden(true)
                         .font(.system(size: 28))
                         .foregroundStyle(.secondary)
                     Text(tr("Drop photos here"))
